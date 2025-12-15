@@ -1,0 +1,23 @@
+/* style.css */
+body { 
+    background-color: #f3f4f6; 
+}
+
+/* Police type "machine à écrire" pour les chiffres financiers */
+.input-money { 
+    font-family: 'Courier New', Courier, monospace; 
+    font-weight: bold; 
+}
+
+/* Cache l'application tant que Vue n'est pas chargé pour éviter l'effet de clignotement */
+[v-cloak] { 
+    display: none; 
+}
+
+/* Transitions pour les éléments (Optionnel mais joli) */
+.fade-enter-active, .fade-leave-active {
+    transition: opacity 0.3s ease;
+}
+.fade-enter-from, .fade-leave-to {
+    opacity: 0;
+}
