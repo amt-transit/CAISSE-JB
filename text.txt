@@ -21,4 +21,6 @@ const app = initializeApp(firebaseConfig);
 Email : admin@caisse.com / Mot de passe : admin123 (Ce sera le chef).
 
 Email : visiteur@caisse.com / Mot de passe : visiteur123 (Ce sera le spectateur).
-mODE ESSAIE
+git remote add origin https://github.com/amt-transit/CAISSE-JB.git
+ git branch -M main 
+git push -u origin main
