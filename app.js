@@ -309,24 +309,7 @@ createApp({
             if (isAdmin.value) return selectedTransactionsHistory.value;
             return selectedTransactionsHistory.value.filter(t => !t.isHidden);
         });
-        // --- TOTAUX POUR LE MODAL HISTORIQUE (Ventilation) ---
-        const historyModalTotals = computed(() => {
-            let t = { entree: 0, sortie: 0, espece: 0, om: 0, wave: 0 };
-            
-            visibleHistoryTransactions.value.forEach(tx => {
-                const net = tx.amount - (tx.fees || 0);
-                
-                // 1. Total Entrées / Sorties
-                if (tx.type === 'CREDIT') t.entree += net;
-                else t.sortie += net;
-
-                // 2. Total par Canal (en valeur absolue pour voir le volume)
-                if (tx.category === 'ESPECE') t.espece += net;
-                if (tx.category === 'OM') t.om += net;
-                if (tx.category === 'WAVE') t.wave += net;
-            });
-            return t;
-        });
+        
 
         // --- CALCULS ---
         const totals = computed(() => {
@@ -615,7 +598,7 @@ createApp({
             // Actions
             startSession, addTransaction, updateStartAmounts, openClosingModal, confirmClose, deleteTransaction,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
-            getModeAbbr, saveBilletage, showHiddenTransactions, historyModalTotals
+            getModeAbbr, saveBilletage, showHiddenTransactions
         };
     }
 }).mount('#app');
