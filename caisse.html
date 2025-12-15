@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CaisseManager - Compact</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f3f4f6; font-family: sans-serif; }
+        /* Table Compacte style Excel */
+        .table-compact th, .table-compact td {
+            padding: 4px 8px; /* Padding très fin */
+            border: 1px solid #e5e7eb; /* Bordures grises fines */
+            white-space: nowrap; /* Empêche le retour à la ligne */
+        }
+        .table-compact th { background-color: #f3f4f6; font-size: 11px; text-transform: uppercase; color: #6b7280; }
+        .table-compact td { font-size: 12px; }
+        /* Input invisible pour l'édition inline si besoin plus tard */
+        .cell-input { width: 100%; background: transparent; border: none; outline: none; }
+        [v-cloak] { display: none; }
+    </style>
+
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body class="text-gray-800 text-sm">
+
+<div id="app" class="min-h-screen flex flex-col" v-cloak>
+
+    <div v-if="authLoading" class="flex flex-grow items-center justify-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-700"></div></div>
+
+    <div v-else-if="!user" class="flex flex-grow items-center justify-center p-4">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md">
+            <div class="text-center mb-6"><i class="fa-solid fa-wallet text-4xl text-indigo-700 mb-2"></i><h1 class="text-2xl font-bold text-gray-800">CaisseManager</h1><p class="text-gray-500 text-sm">Identifiez-vous</p></div>
+            <form @submit.prevent="login">
+                <div class="mb-4"><label class="block text-sm font-bold text-gray-700 mb-1">Email</label><input type="email" v-model="loginForm.email" class="w-full p-2 border rounded" required></div>
+                <div class="mb-6"><label class="block text-sm font-bold text-gray-700 mb-1">Mot de passe</label><input type="password" v-model="loginForm.password" class="w-full p-2 border rounded" required></div>
+                <div v-if="loginError" class="bg-red-100 text-red-700 p-2 rounded mb-4 text-center">{{ loginError }}</div>
+                <button type="submit" class="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2 rounded shadow">Connexion</button>
+            </form>
+        </div>
+    </div>
+
+    <div v-else class="flex flex-col min-h-screen">
+        
+        <nav class="bg-indigo-900 text-white p-2 shadow-lg sticky top-0 z-30 text-xs">
+            <div class="flex justify-between items-center mb-1">
+                <div class="flex items-center gap-2"><i class="fa-solid fa-wallet text-xl text-orange-400"></i><div><h1 class="text-lg font-bold tracking-wider">CaisseManager</h1><div class="text-indigo-300">{{ user.email }} <span v-if="isAdmin" class="bg-red-500 px-1 rounded text-[9px]">ADMIN</span></div></div></div>
+                <button @click="logout" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded border border-gray-500">Sortir</button>
+            </div>
+            <div class="flex space-x-4 border-b border-indigo-700">
+                <button @click="currentView = 'dashboard'" :class="currentView === 'dashboard' ? 'border-b-2 border-orange-400 text-white font-bold' : 'text-indigo-300 hover:text-white'" class="pb-1 px-2 transition">Tableau de bord</button>
+                <button @click="currentView = 'history'" :class="currentView === 'history' ? 'border-b-2 border-orange-400 text-white font-bold' : 'text-indigo-300 hover:text-white'" class="pb-1 px-2 transition">Historique</button>
+                <button v-if="isAdmin" @click="currentView = 'database'" :class="currentView === 'database' ? 'border-b-2 border-orange-400 text-white font-bold' : 'text-indigo-300 hover:text-white'" class="pb-1 px-2 transition">Base Clients</button>
+            </div>
+        </nav>
+
+        <main class="flex-grow p-2 md:p-4 max-w-full w-full mx-auto">
+
+            <div v-if="currentView === 'dashboard'">
+                
+                <div v-if="!currentSession && !loading" class="flex flex-col items-center justify-center py-10">
+                    <div class="bg-white p-8 rounded-xl shadow-2xl max-w-lg w-full border-t-4 border-indigo-600 text-center">
+                        <h2 class="text-2xl font-bold mb-2 text-gray-800">Caisse Fermée</h2>
+                        <div v-if="isAdmin">
+                            <p class="text-gray-500 mb-6 text-sm">Reports pour ouvrir :</p>
+                            <div class="space-y-2 mb-6 text-left">
+                                <div class="flex justify-between items-center"><label class="text-xs font-bold text-green-700 w-24">Espèce</label><input type="number" v-model.number="startAmounts.espece" class="flex-1 p-1 border rounded text-right"></div>
+                                <div class="flex justify-between items-center"><label class="text-xs font-bold text-orange-600 w-24">OM</label><input type="number" v-model.number="startAmounts.om" class="flex-1 p-1 border rounded text-right"></div>
+                                <div class="flex justify-between items-center"><label class="text-xs font-bold text-blue-500 w-24">Wave</label><input type="number" v-model.number="startAmounts.wave" class="flex-1 p-1 border rounded text-right"></div>
+                            </div>
+                            <button @click="startSession" class="w-full bg-indigo-700 text-white font-bold py-2 rounded shadow">OUVRIR</button>
+                        </div>
+                        <div v-else class="py-8 text-gray-400">En attente d'ouverture.</div>
+                    </div>
+                </div>
+
+                <div v-else-if="currentSession">
+                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-2 mb-2">
+                        <div class="bg-white p-2 rounded shadow border-l-4 border-orange-500 flex justify-between items-center">
+                            <div><p class="text-[10px] font-bold text-gray-400 uppercase">OM (Net)</p><p class="text-lg font-bold text-orange-600 font-mono leading-none">{{ formatMoney(totals.om) }}</p></div>
+                        </div>
+                        <div class="bg-white p-2 rounded shadow border-l-4 border-blue-400 flex justify-between items-center">
+                            <div><p class="text-[10px] font-bold text-gray-400 uppercase">Wave</p><p class="text-lg font-bold text-blue-500 font-mono leading-none">{{ formatMoney(totals.wave) }}</p></div>
+                        </div>
+                        <div class="bg-white p-2 rounded shadow border-l-4 border-green-500">
+                            <div class="flex justify-between text-xs mb-1"><span class="text-gray-500">Théo:</span><span class="font-bold">{{ formatMoney(totals.espece) }}</span></div>
+                            <div class="flex justify-between text-xs"><span class="text-gray-500">Réel:</span><span class="font-bold text-blue-600">{{ formatMoney(totalEspeceCompte) }}</span></div>
+                        </div>
+                        <div class="p-2 rounded shadow text-center flex flex-col justify-center" :class="getGapClass(totalEspeceCompte - totals.espece)">
+                            <div class="text-[10px] uppercase font-bold opacity-70">Écart</div>
+                            <div class="text-lg font-bold font-mono leading-none">{{ (totalEspeceCompte - totals.espece) > 0 ? '+' : '' }}{{ formatMoney(totalEspeceCompte - totals.espece) }}</div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col lg:flex-row gap-2 h-[calc(100vh-180px)]">
+                        
+                        <div class="lg:w-1/4 flex flex-col gap-2" v-if="isAdmin">
+                            <div class="bg-white p-2 rounded shadow border border-gray-200 overflow-y-auto max-h-40">
+                                <div class="grid grid-cols-2 gap-x-2 gap-y-1">
+                                    <div v-for="b in billets" :key="b.val" class="flex items-center gap-1">
+                                        <span class="text-[10px] font-bold w-10 text-right">{{ b.val }}</span>
+                                        <input type="number" v-model.number="b.count" @change="saveBilletage" class="w-12 p-0.5 text-center text-xs border rounded" placeholder="0">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded shadow flex-grow overflow-y-auto">
+                                <h3 class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> Nouvelle Opération</h3>
+                                <form @submit.prevent="addTransaction" class="space-y-2">
+                                    <div><label class="text-[10px] font-bold text-gray-500">Date</label><input type="date" v-model="form.date" class="w-full p-1 border rounded text-xs"></div>
+                                    
+                                    <div class="relative">
+                                        <input type="text" v-model="searchQuery" placeholder="Recherche Client (BD)..." class="w-full p-1 border-2 border-indigo-100 rounded text-xs bg-indigo-50" @input="showSuggestions = true">
+                                        <div v-if="showSuggestions && filteredClients.length > 0" class="absolute z-50 w-full bg-white border shadow-xl rounded max-h-60 overflow-y-auto mt-1 left-0">
+                                            <div v-for="client in filteredClients" :key="client.id" @click="selectClient(client)" class="p-2 hover:bg-indigo-50 cursor-pointer border-b text-xs">
+                                                <div class="flex justify-between font-bold text-indigo-700"><span>{{ client.REFERENCE }}</span><span>{{ client.PRIX }} F</span></div>
+                                                <div class="text-gray-600 truncate">{{ client.EXPEDITEUR }}</div>
+                                                <div class="text-gray-400 text-[10px] truncate" v-if="client.DESTINATEUR">Dest: {{ client.DESTINATEUR }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex gap-1">
+                                        <button type="button" @click="form.type = 'CREDIT'" :class="form.type === 'CREDIT' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'" class="flex-1 py-1 rounded text-xs font-bold">ENTRÉE</button>
+                                        <button type="button" @click="form.type = 'DEBIT'" :class="form.type === 'DEBIT' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-500'" class="flex-1 py-1 rounded text-xs font-bold">SORTIE</button>
+                                    </div>
+
+                                    <div class="flex gap-2">
+                                        <div class="w-1/2"><label class="text-[10px] text-gray-500">Compte</label><select v-model="form.category" class="w-full p-1 border rounded text-xs"><option value="ESPECE">Espèces</option><option value="OM">Orange Money</option><option value="WAVE">Wave</option><option value="BANQUE">Banque</option></select></div>
+                                        <div class="w-1/2"><label class="text-[10px] text-gray-500">Rèf</label><input type="text" v-model="form.reference" class="w-full p-1 border rounded text-xs"></div>
+                                    </div>
+
+                                    <div><label class="text-[10px] text-gray-500">Expéditeur</label><input type="text" v-model="form.label" class="w-full p-1 border rounded text-xs font-bold" required></div>
+                                    <div><label class="text-[10px] text-gray-500">Destinataire</label><input type="text" v-model="form.recipient" class="w-full p-1 border rounded text-xs"></div>
+                                    <div><label class="text-[10px] text-gray-500">Montant</label><input type="number" v-model.number="form.amount" class="w-full p-1 border rounded text-sm font-mono font-bold" required></div>
+                                    
+                                    <div class="flex items-center gap-2 cursor-pointer" @click="form.isHidden = !form.isHidden">
+                                        <div class="w-4 h-4 border rounded flex items-center justify-center" :class="form.isHidden ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'"><i v-if="form.isHidden" class="fa-solid fa-check text-white text-[8px]"></i></div>
+                                        <span class="text-[10px] text-gray-600">Cacher (Interne)</span>
+                                    </div>
+
+                                    <button type="submit" class="w-full mt-2 bg-indigo-700 text-white font-bold py-2 rounded shadow text-xs">AJOUTER</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div :class="isAdmin ? 'lg:w-3/4' : 'w-full'" class="flex flex-col bg-white rounded shadow h-full overflow-hidden">
+                            <div class="p-2 bg-gray-50 border-b flex justify-between items-center">
+                                <div class="flex items-center gap-4">
+                                    <h3 class="font-bold text-gray-700 text-sm">Journal ({{ visibleTransactions.length }})</h3>
+                                    
+                                    <label v-if="isAdmin" class="flex items-center gap-1 cursor-pointer select-none">
+                                        <input type="checkbox" v-model="showHiddenTransactions" class="rounded text-indigo-600 w-3 h-3 focus:ring-0">
+                                        <span class="text-[10px] text-gray-600 font-bold">Voir Interne</span>
+                                    </label>
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <button v-if="isAdmin" @click="exportToExcel(visibleTransactions, 'Journal')" class="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700 shadow"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
+                                    <button v-if="isAdmin" @click="exportToPDF" class="bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700 shadow"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
+                                    <button v-if="isAdmin" @click="openClosingModal" class="bg-gray-800 text-white px-2 py-1 rounded text-xs ml-2 hover:bg-black shadow"><i class="fa-solid fa-lock mr-1"></i>Clôturer</button>
+                                </div>
+                            </div>
+                            
+                            <div class="flex-grow overflow-auto">
+                                <table class="w-full text-left border-collapse table-compact">
+                                    <thead class="sticky top-0 z-10 shadow-sm">
+                                        <tr>
+                                            <th>Date / Heure</th>
+                                            <th>Rèf</th>
+                                            <th>Expéditeur</th>
+                                            <th>Destinataire</th>
+                                            <th class="text-center">Mode</th>
+                                            <th class="text-right">Montant</th>
+                                            <th class="text-right">Solde Colis</th>
+                                            <th v-if="isAdmin" class="w-6"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white">
+                                        <tr v-for="tx in visibleTransactions" :key="tx.id" class="hover:bg-blue-50 group" :class="{'bg-yellow-50': tx.isHidden}">
+                                            
+                                            <td class="text-gray-500 text-[10px] leading-tight">
+                                                <div class="font-bold">{{ formatDate(tx.timestamp) }}</div>
+                                                <div>{{ formatTime(tx.timestamp) }}</div>
+                                            </td>
+
+                                            <td class="font-mono font-bold text-indigo-700">
+                                                {{ tx.reference || '' }}
+                                            </td>
+
+                                            <td class="text-gray-800 font-medium truncate max-w-[150px]">
+                                                <i v-if="tx.isHidden" class="fa-solid fa-eye-slash text-gray-400 mr-1 text-[10px]"></i>
+                                                {{ tx.label }}
+                                            </td>
+
+                                            <td class="text-gray-600 truncate max-w-[150px]">
+                                                {{ tx.recipient }}
+                                            </td>
+
+                                            <td class="text-center">
+                                                <span class="px-1 py-0.5 rounded text-[9px] font-bold border"
+                                                    :class="{
+                                                        'bg-orange-50 text-orange-700 border-orange-200': tx.category === 'OM',
+                                                        'bg-blue-50 text-blue-700 border-blue-200': tx.category === 'WAVE',
+                                                        'bg-green-50 text-green-700 border-green-200': tx.category === 'ESPECE',
+                                                        'bg-gray-50 text-gray-700 border-gray-200': tx.category === 'BANQUE'
+                                                    }">
+                                                    {{ getModeAbbr(tx.category) }}
+                                                </span>
+                                            </td>
+
+                                            <td class="text-right font-mono font-bold" :class="tx.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'">
+                                                {{ formatMoney(tx.amount - (tx.fees || 0)) }}
+                                                <span v-if="tx.category === 'OM' && tx.fees > 0" class="text-[9px] text-gray-400 block leading-none font-normal">Tot: {{ tx.amount }}</span>
+                                            </td>
+
+                                            <td class="text-right font-mono text-[10px]">
+                                                <div v-if="tx.expectedPrice && tx.expectedPrice > 0">
+                                                    <span v-if="(tx.amount - tx.expectedPrice) < 0" class="text-red-600 font-bold">
+                                                        {{ formatMoney(tx.amount - tx.expectedPrice) }}
+                                                    </span>
+                                                    <span v-else-if="(tx.amount - tx.expectedPrice) > 0" class="text-green-600">
+                                                        +{{ formatMoney(tx.amount - tx.expectedPrice) }}
+                                                    </span>
+                                                    <span v-else class="text-green-400"><i class="fa-solid fa-check"></i></span>
+                                                </div>
+                                            </td>
+
+                                            <td v-if="isAdmin" class="text-right p-0">
+                                                <button @click="deleteTransaction(tx.id)" class="text-gray-300 hover:text-red-500 px-2 py-1 opacity-0 group-hover:opacity-100 transition">
+                                                    <i class="fa-solid fa-times"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentView === 'history'" class="bg-white rounded shadow p-4">
+                <h3 class="font-bold text-gray-700 mb-4">Historique</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left table-compact">
+                        <thead><tr><th>Date</th><th class="text-right">Entrées</th><th class="text-right">Sorties</th><th class="text-right">Espèce</th><th class="text-right">OM</th><th class="text-right">Wave</th><th class="text-center">Action</th></tr></thead>
+                        <tbody><tr v-for="sess in closedSessions" :key="sess.id" class="hover:bg-gray-50"><td>{{ formatDateTime(sess.endTime) }}</td><td class="text-right text-green-600">{{ sess.flux ? formatMoney(sess.flux.credit) : '-' }}</td><td class="text-right text-red-600">{{ sess.flux ? formatMoney(sess.flux.debit) : '-' }}</td><td class="text-right font-bold">{{ formatMoney(sess.totalsComputed?.espece) }}</td><td class="text-right">{{ formatMoney(sess.totalsComputed?.om) }}</td><td class="text-right">{{ formatMoney(sess.totalsComputed?.wave) }}</td><td class="text-center"><button @click="openHistoryDetails(sess)" class="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold">Voir</button></td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div v-if="currentView === 'database' && isAdmin" class="bg-white rounded shadow p-4">
+                <h2 class="text-lg font-bold mb-4">Gestion Base Clients</h2>
+                <div class="bg-blue-50 p-4 rounded mb-4 border border-blue-200">
+                    <h3 class="text-sm font-bold text-blue-800 mb-2">Import CSV (Virgule)</h3>
+                    <input type="file" ref="fileInput" accept=".csv" class="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-blue-600 file:text-white hover:file:bg-blue-700"/>
+                    <button @click="importClients" class="mt-2 bg-blue-600 text-white font-bold py-1 px-4 rounded text-xs shadow hover:bg-blue-700">Importer</button>
+                    <div v-if="importStatus" class="mt-1 text-xs font-bold text-blue-600">{{ importStatus }}</div>
+                </div>
+                <div class="overflow-auto max-h-[500px] border rounded">
+                    <table class="w-full text-left table-compact">
+                        <thead class="sticky top-0"><tr><th>Réf</th><th>Expéditeur</th><th>Destinataire</th><th>Tél 1</th><th>Tél 2</th><th class="text-right">Prix</th></tr></thead>
+                        <tbody><tr v-for="c in clientDatabase.slice(0, 100)" :key="c.id"><td>{{ c.REFERENCE }}</td><td>{{ c.EXPEDITEUR }}</td><td>{{ c.DESTINATEUR }}</td><td>{{ c.TELEPHONE }}</td><td>{{ c.TELEPHONE2 }}</td><td class="text-right">{{ c.PRIX }}</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+
+        <div v-if="showClosingModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-96 p-4">
+                <h3 class="text-lg font-bold mb-4">Clôture</h3>
+                <div class="space-y-2 mb-4">
+                    <div><label class="text-xs font-bold text-orange-600">OM (Réel)</label><input type="number" v-model.number="closing.om" class="w-full p-1 border rounded"></div>
+                    <div><label class="text-xs font-bold text-blue-600">Wave (Réel)</label><input type="number" v-model.number="closing.wave" class="w-full p-1 border rounded"></div>
+                </div>
+                <div class="text-sm border-t pt-2 mb-4">
+                    <div class="flex justify-between"><span>OM (Théo):</span><span>{{ formatMoney(totals.om) }}</span></div>
+                    <div class="flex justify-between font-bold" :class="getGapClass(closing.om - totals.om)"><span>Écart OM:</span><span>{{ formatGap(closing.om - totals.om) }}</span></div>
+                    <div class="mt-2 flex justify-between"><span>Wave (Théo):</span><span>{{ formatMoney(totals.wave) }}</span></div>
+                    <div class="flex justify-between font-bold" :class="getGapClass(closing.wave - totals.wave)"><span>Écart Wave:</span><span>{{ formatGap(closing.wave - totals.wave) }}</span></div>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button @click="showClosingModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button>
+                    <button @click="confirmClose" class="px-3 py-1 bg-red-600 text-white rounded text-xs font-bold">CLÔTURER</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showHistoryModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+            <div class="bg-white rounded shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col">
+                <div class="p-3 border-b flex justify-between items-center bg-gray-100">
+                    <h3 class="font-bold">Détails Archive</h3>
+                    <div class="flex gap-2">
+                        <button v-if="isAdmin" @click="exportToExcel(visibleHistoryTransactions, 'Archive')" class="bg-green-600 text-white px-2 py-1 rounded text-xs">Excel</button>
+                        <button @click="showHistoryModal = false" class="text-gray-500 hover:text-black"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="p-0 overflow-auto">
+                    <table class="w-full text-left table-compact">
+                        <thead><tr><th>Heure</th><th>Réf</th><th>Expéditeur</th><th>Destinataire</th><th>Mode</th><th class="text-right">Montant</th></tr></thead>
+                        <tbody>
+                            <tr v-for="tx in visibleHistoryTransactions" :key="tx.id" :class="{'bg-yellow-50': tx.isHidden}">
+                                <td>{{ formatTime(tx.timestamp) }}</td>
+                                <td class="font-bold text-indigo-700">{{ tx.reference }}</td>
+                                <td>{{ tx.label }}</td>
+                                <td>{{ tx.recipient }}</td>
+                                <td>{{ getModeAbbr(tx.category) }}</td>
+                                <td class="text-right font-bold">{{ formatMoney(tx.amount - (tx.fees||0)) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
