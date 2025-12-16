@@ -466,7 +466,15 @@ createApp({
             return t;
         });
 
-        const visibleHistoryTransactions = computed(() => selectedTransactionsHistory.value);
+        // Filtre de sécurité pour l'historique (Modifié)
+        const visibleHistoryTransactions = computed(() => {
+            // Si c'est un simple visiteur, on cache les transactions masquées
+            if (!isAdmin.value) {
+                return selectedTransactionsHistory.value.filter(t => !t.isHidden);
+            }
+            // Si c'est l'admin, on montre tout
+            return selectedTransactionsHistory.value;
+        });
         
         const filteredClients = computed(() => {
             if (!searchQuery.value || searchQuery.value.length < 2) return [];
