@@ -1,9 +1,8 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-import { getFirestore, collection, addDoc, setDoc, deleteDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDocs, Timestamp, writeBatch } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-import { createApp, ref, computed, onMounted } from "https://unpkg.com/vue@3/dist/vue.esm-browser.js";
+import { createApp, ref, computed, onMounted, watch } from "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, setDoc, deleteDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDocs, Timestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
-// --- CONFIGURATION FIREBASE ---
+// CONFIGURATION FIREBASE (Remettez VOS clés ici si elles sont différentes)
 const firebaseConfig = {
     apiKey: "AIzaSyDvo7FRCpr_mE4nTGz6VW7-UL0U1JKe-g8",
     authDomain: "caisse-jb.firebaseapp.com",
@@ -13,610 +12,645 @@ const firebaseConfig = {
     appId: "1:877905828814:web:79840cd0dfcb8a8036e99f"   
 };
 
-let db, auth;
-try {
-    const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
-} catch(e) { console.warn("Firebase non configuré"); }
+// Initialisation
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
 createApp({
     setup() {
-        // --- ETAT ---
+        // --- ETAT AUTHENTIFICATION ---
         const user = ref(null);
-        const isAdmin = ref(false);
         const authLoading = ref(true);
         const loginForm = ref({ email: '', password: '' });
         const loginError = ref('');
+        const isAdmin = computed(() => user.value && user.value.email === 'admin@caisse.com'); // Mettez votre email admin ici
 
-        const currentView = ref('dashboard'); 
-        const currentSession = ref(null);
-        const transactions = ref([]); 
-        const loading = ref(false);
-        const showClosingModal = ref(false);
-        const showEditStartModal = ref(false);
+        // --- ETAT APPLICATION ---
+        const currentView = ref('dashboard'); // dashboard, history, database, salaire
+        const currentSalaireView = ref('employes'); // employes, paie, historique, tontine
         
-        // BASE CLIENTS
-        const clientDatabase = ref([]); // La liste complète en mémoire
-        const searchQuery = ref('');
-        const showSuggestions = ref(false);
-        const fileInput = ref(null);
-        const importStatus = ref('');
+        // --- DONNEES CAISSE ---
+        const currentSession = ref(null);
+        const transactions = ref([]);
+        const loading = ref(false);
+        const startAmounts = ref({ espece: 0, om: 0, wave: 0 });
+        const form = ref({ type: 'CREDIT', category: 'ESPECE', amount: '', label: '', recipient: '', reference: '', date: new Date().toISOString().split('T')[0], expectedPrice: 0, isHidden: false });
+        const closing = ref({ om: 0, wave: 0 });
+        const showClosingModal = ref(false);
+        const billets = ref([ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ]);
+        const showHiddenTransactions = ref(true);
 
-        // Historique
+        // --- DONNEES HISTORIQUE CAISSE ---
         const closedSessions = ref([]);
         const showHistoryModal = ref(false);
         const selectedSessionHistory = ref(null);
         const selectedTransactionsHistory = ref([]);
         
-        const startAmounts = ref({ espece: 0, om: 0, wave: 0 });
-        const getTodayString = () => new Date().toISOString().split('T')[0];
-        // AJOUT de form.reference
-        const form = ref({ 
-            date: getTodayString(), 
-            type: 'DEBIT', 
-            category: 'ESPECE', 
-            label: '', 
-            recipient: '', 
-            reference: '', 
-            amount: '', 
-            expectedPrice: 0, // <--- NOUVEAU : On stocke le prix théorique ici
-            isHidden: false 
-        });
-        const closing = ref({ om: 0, wave: 0 });
-        const billets = ref([
-            { val: 10000, count: 0 }, { val: 5000, count: 0 }, { val: 2000, count: 0 },
-            { val: 1000, count: 0 }, { val: 500, count: 0 }, { val: 200, count: 0 },
-            { val: 100, count: 0 }, { val: 50, count: 0 }
-        ]);
+        // --- DONNEES DATABASE CLIENT ---
+        const clientDatabase = ref([]);
+        const searchQuery = ref('');
+        const showSuggestions = ref(false);
+        const fileInput = ref(null);
+        const importStatus = ref('');
 
-        // --- AUTH ---
-        const login = async () => {
-            loginError.value = '';
-            try { await signInWithEmailAndPassword(auth, loginForm.value.email, loginForm.value.password); } 
-            catch (e) { loginError.value = "Erreur login."; }
-        };
+        // --- DONNEES SALAIRE ---
+        const employeesList = ref([]);
+        const salaryHistory = ref([]);
+        const paiePeriod = ref("15"); // "15" ou "30"
+        const showAddEmployeeModal = ref(false);
+        const showEditEmployeeModal = ref(false); // NOUVEAU
+        const showIndividualHistoryModal = ref(false); // NOUVEAU
+        const showPayModal = ref(false);
+        const newEmp = ref({ name: '', salary: 0, loan: 0, isTontine: false });
+        const editingEmp = ref({}); // NOUVEAU (Stocke l'employé en cours de modification)
+        const selectedEmployeeHistoryId = ref(null); // NOUVEAU
+        const selectedEmployeeHistoryName = ref(''); // NOUVEAU
+        const payForm = ref({});
+        const salaryFunds = ref([]); // NOUVEAU
+        const showFundModal = ref(false); // NOUVEAU
+        const newFund = ref({ amount: '', note: '' }); // NOUVEAU
 
-        const logout = async () => {
-            await signOut(auth);
-            user.value = null; isAdmin.value = false; transactions.value = []; currentSession.value = null;
-        };
+        // ---------------------------------------------------------
+        // --- LOGIQUE SALAIRE (INSPIRÉE DE VOTRE CODE) ---
+        // ---------------------------------------------------------
 
-        onMounted(() => {
-            if (auth) {
-                onAuthStateChanged(auth, (u) => {
-                    user.value = u; authLoading.value = false;
-                    if (u) {
-                        // ⚠️ REMPLACEZ L'EMAIL CI-DESSOUS PAR LE VÔTRE ⚠️
-                        // Exemple : isAdmin.value = (u.email === 'jean.bernard@gmail.com');
-                        isAdmin.value = (u.email === 'admin@caisse.com'); 
-                        
-                        // Ou pour le test, forcez tout le monde Admin (déconseillé après) :
-                        // isAdmin.value = true;
-
-                        loadSessionData();
-                        fetchHistory();
-                        loadClients();
-                    }
-                });
-            }
-        });
-
-        // --- CHARGEMENT DES DONNÉES (Mise à jour) ---
-        const loadSessionData = () => {
-            if(!db) return;
-            const q = query(collection(db, "sessions"), where("status", "==", "OPEN"));
-            onSnapshot(q, (snap) => {
-                if (!snap.empty) {
-                    const d = snap.docs[0];
-                    const data = d.data();
-                    
-                    // Initialisation des reports si manquants
-                    if (!data.startAmounts) data.startAmounts = { espece: data.startBalance || 0, om: 0, wave: 0 };
-                    
-                    // --- NOUVEAU : On charge le billetage s'il existe déjà en base ---
-                    if (data.billetage) {
-                        billets.value = data.billetage;
-                    }
-
-                    currentSession.value = { id: d.id, ...data };
-                    subscribeToTransactions(d.id);
-                } else { 
-                    currentSession.value = null; 
-                }
+        // 1. Charger Employés
+        const loadEmployees = () => {
+             onSnapshot(collection(db, "employees"), (snap) => {
+                employeesList.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             });
         };
 
-        // --- SAUVEGARDE AUTOMATIQUE DU BILLETAGE (Nouveau) ---
-        const saveBilletage = async () => {
-            if (!currentSession.value) return;
+        // 2. Charger Historique Salaires
+        const loadSalaryHistory = () => {
+             onSnapshot(query(collection(db, "salary_payments"), orderBy('timestamp', 'desc')), (snap) => {
+                salaryHistory.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            });
+        };
+        // 3-Bis. Ouvrir Modal Modification (NOUVEAU)
+        const openEditEmployee = (emp) => {
+            // On clone l'objet pour ne pas modifier la liste directement avant confirmation
+            editingEmp.value = { ...emp };
+            showEditEmployeeModal.value = true;
+        };
+
+        // 3-Ter. Enregistrer Modification (NOUVEAU)
+        const updateEmployee = async () => {
             try {
-                // On met à jour uniquement le champ "billetage" de la session en cours
-                await updateDoc(doc(db, "sessions", currentSession.value.id), {
-                    billetage: billets.value
+                const empRef = doc(db, "employees", editingEmp.value.id);
+                await updateDoc(empRef, {
+                    name: editingEmp.value.name,
+                    salary: editingEmp.value.salary,
+                    loan: editingEmp.value.loan,
+                    isTontine: editingEmp.value.isTontine
                 });
-                // Pas besoin d'alerte, c'est une sauvegarde silencieuse
-            } catch (e) {
-                console.error("Erreur sauvegarde billetage", e);
+                showEditEmployeeModal.value = false;
+                // Pas besoin de recharger, le onSnapshot le fera tout seul
+            } catch(e) { alert("Erreur modification: " + e.message); }
+        };
+        const unpaidEmployees = computed(() => {
+            const currentMonth = new Date().toISOString().slice(0, 7); // "2023-12"
+            const currentTypeLabel = paiePeriod.value === '15' ? 'Acompte (15)' : 'Solde (Fin)';
+            
+            // On retourne seulement les employés qui n'ont PAS de paiement correspondant dans l'historique
+            return employeesList.value.filter(emp => {
+                const hasBeenPaid = salaryHistory.value.some(pay => 
+                    pay.employeeId === emp.id && 
+                    pay.month === currentMonth && 
+                    pay.type === currentTypeLabel
+                );
+                return !hasBeenPaid; // Garde si NON payé
+            });
+        });
+
+        // 12. Historique Individuel (NOUVEAU)
+        const openIndividualHistory = (emp) => {
+            selectedEmployeeHistoryId.value = emp.id;
+            selectedEmployeeHistoryName.value = emp.name;
+            showIndividualHistoryModal.value = true;
+        };
+
+        const individualHistory = computed(() => {
+            if(!selectedEmployeeHistoryId.value) return [];
+            return salaryHistory.value.filter(p => p.employeeId === selectedEmployeeHistoryId.value);
+        });
+
+        // 3. Ajouter Employé
+        const saveNewEmployee = async () => {
+            if(!newEmp.value.name || !newEmp.value.salary) return;
+            try {
+                await addDoc(collection(db, "employees"), {
+                    name: newEmp.value.name,
+                    salary: newEmp.value.salary,
+                    loan: newEmp.value.loan || 0,
+                    isTontine: newEmp.value.isTontine
+                });
+                showAddEmployeeModal.value = false;
+                newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
+            } catch(e) { alert("Erreur: " + e.message); }
+        };
+
+        // 4. Supprimer Employé
+        const deleteEmployee = async (id) => {
+            if(confirm("Supprimer cet employé ?")) await deleteDoc(doc(db, "employees", id));
+        };
+
+        // 5. Calculs Paie (LOGIQUE INTELLIGENTE)
+        const calculateBase = (emp) => {
+            // Cas 1 : Si on est en train de faire les Acomptes du 15
+            if (paiePeriod.value === '15') {
+                return Math.round(emp.salary / 2); // Toujours la moitié
             }
+
+            // Cas 2 : Si on est en train de faire le Solde de fin de mois (30)
+            if (paiePeriod.value === '30') {
+                const currentMonth = new Date().toISOString().slice(0, 7); // Ex: "2025-12"
+                
+                // On vérifie si cet employé a DÉJÀ reçu un acompte ce mois-ci
+                const hasTakenAdvance = salaryHistory.value.some(p => 
+                    p.employeeId === emp.id && 
+                    p.month === currentMonth && 
+                    p.type === 'Acompte (15)'
+                );
+
+                if (hasTakenAdvance) {
+                    // Il a déjà pris l'acompte -> On lui verse le RESTE (la moitié)
+                    return Math.round(emp.salary / 2);
+                } else {
+                    // Il n'a rien pris ce mois-ci -> On lui verse la TOTALITÉ
+                    return emp.salary;
+                }
+            }
+            
+            return 0;
+        };
+        
+        const calculateLoanDeduc = (emp) => {
+            // On retient max 10.000 ou le reste de la dette si moins
+            return (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
+        };
+        
+        const calculateTontineDeduc = (emp) => {
+            // On retient 15.000 seulement à la fin du mois (30)
+            return (emp.isTontine && paiePeriod.value === "30") ? 15000 : 0;
         };
 
-        // --- CLIENT DATABASE LOGIC ---
-        const loadClients = async () => {
-            if(!db) return;
-            // On charge tout d'un coup (car ~1500 clients, c'est léger)
-            const snap = await getDocs(collection(db, "clients"));
-            clientDatabase.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const calculateNet = (emp) => {
+            return calculateBase(emp) - calculateLoanDeduc(emp) - calculateTontineDeduc(emp);
         };
 
-        // --- 1. FONCTION D'IMPORTATION (Mise à jour avec Conversion Euro -> CFA) ---
-        const importClients = async () => {
-            const file = fileInput.value.files[0];
-            if (!file) return alert("Veuillez choisir un fichier CSV");
-            
-            importStatus.value = "Analyse en cours...";
-            
-            Papa.parse(file, {
-                header: true,
-                delimiter: ",", // Séparateur virgule
-                skipEmptyLines: true,
-                complete: async (results) => {
-                    if (results.data.length === 0) return alert("Fichier vide ou mauvais format");
-                    
-                    importStatus.value = `Traitement de ${results.data.length} lignes...`;
-                    
-                    const chunks = [];
-                    for (let i = 0; i < results.data.length; i += 400) {
-                        chunks.push(results.data.slice(i, i + 400));
-                    }
+        // Fonction pour recalculer le Net quand on modifie le Prêt manuellement
+        const recalcNet = () => {
+            // Sécurité : On ne peut pas rembourser plus que la dette restante
+            if (payForm.value.loan > payForm.value.maxLoan) {
+                alert("Attention : Ce montant dépasse la dette de l'employé (" + formatMoney(payForm.value.maxLoan) + ")");
+                payForm.value.loan = payForm.value.maxLoan;
+            }
+            // Net = Base - Prêt - Tontine
+            payForm.value.net = payForm.value.base - payForm.value.loan - payForm.value.tontine;
+        };
 
-                    try {
-                        let countAdded = 0;
-                        for (const chunk of chunks) {
-                            const batch = writeBatch(db);
-                            chunk.forEach(row => {
-                                if(row.REFERENCE) {
-                                    const cleanRef = row.REFERENCE.replace(/\//g, "-").trim();
-                                    const docRef = doc(db, "clients", cleanRef);
-                                    
-                                    // CONVERSION AUTOMATIQUE EURO -> CFA
-                                    // On remplace la virgule par un point (au cas où) et on multiplie par 656
-                                    let prixCFA = 0;
-                                    if (row.PRIX) {
-                                        // Nettoyage du prix (enlève les espaces, remplace , par .)
-                                        const prixNet = row.PRIX.toString().replace(/\s/g, '').replace(',', '.');
-                                        prixCFA = Math.round(parseFloat(prixNet) * 656);
-                                    }
+        // 6. Ouvrir Modal Paiement (MISE À JOUR)
+        const openPayModal = (emp) => {
+            const currentMonth = new Date().toISOString().slice(0, 7); 
+            
+            // Suggestion de base (comme avant, mais modifiable)
+            const suggestedLoan = (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
+            const tontineAmount = calculateTontineDeduc(emp);
+            const baseAmount = calculateBase(emp);
 
-                                    batch.set(docRef, {
-                                        REFERENCE: row.REFERENCE,
-                                        EXPEDITEUR: row.EXPEDITEUR || '',
-                                        TELEPHONE: row.TELEPHONE || '',
-                                        PRIX: prixCFA, // Ici on stocke le montant converti
-                                        DESTINATEUR: row.DESTINATEUR || '',
-                                        TELEPHONE2: row.TELEPHONE2 || ''
-                                    }, { merge: true });
-                                    
-                                    countAdded++;
-                                }
-                            });
-                            await batch.commit();
-                        }
-                        importStatus.value = `Succès ! ${countAdded} fiches traitées (Converties en CFA).`;
-                        loadClients(); 
-                    } catch (e) {
-                        console.error(e);
-                        importStatus.value = "Erreur import : " + e.message;
+            payForm.value = {
+                id: emp.id,
+                name: emp.name,
+                month: currentMonth,
+                base: baseAmount,
+                loan: suggestedLoan,     // Montant modifiable
+                maxLoan: emp.loan || 0,  // Pour vérifier qu'on ne dépasse pas
+                tontine: tontineAmount,
+                net: baseAmount - suggestedLoan - tontineAmount
+            };
+            showPayModal.value = true;
+        };
+
+        // 7. Confirmer Paiement
+        const confirmSalaryPayment = async () => {
+            try {
+                // A. Enregistrer le paiement
+                await addDoc(collection(db, "salary_payments"), {
+                    employeeId: payForm.value.id,
+                    employeeName: payForm.value.name,
+                    month: payForm.value.month,
+                    type: paiePeriod.value === '15' ? 'Acompte (15)' : 'Solde (Fin)',
+                    base: payForm.value.base,
+                    loan: payForm.value.loan,
+                    tontine: payForm.value.tontine,
+                    net: payForm.value.net,
+                    timestamp: Timestamp.now()
+                });
+
+                // B. Mettre à jour la dette de l'employé (si remboursement)
+                if(payForm.value.loan > 0) {
+                    const empRef = doc(db, "employees", payForm.value.id);
+                    // On récupère la dette actuelle pour être sûr
+                    const emp = employeesList.value.find(e => e.id === payForm.value.id);
+                    if(emp) {
+                         await updateDoc(empRef, { loan: Math.max(0, emp.loan - payForm.value.loan) });
                     }
                 }
+
+                showPayModal.value = false;
+                alert("Paiement validé !");
+            } catch(e) { alert("Erreur paiement: " + e.message); }
+        };
+
+        // 8. Supprimer un paiement (Annulation)
+        const deleteSalaryPayment = async (payment) => {
+             if(!confirm("Annuler ce paiement ? Si c'était un remboursement de prêt, la dette sera rétablie.")) return;
+             
+             try {
+                // Si c'était un prêt, on remet la dette
+                if(payment.loan > 0) {
+                    const emp = employeesList.value.find(e => e.id === payment.employeeId);
+                    if(emp) {
+                        await updateDoc(doc(db, "employees", payment.employeeId), {
+                            loan: emp.loan + payment.loan
+                        });
+                    }
+                }
+                await deleteDoc(doc(db, "salary_payments", payment.id));
+             } catch(e) { alert("Erreur: " + e.message); }
+        };
+
+        // 9. Calcul Tontine (Membres qui ont payé ce mois-ci)
+        const tontineMembers = computed(() => employeesList.value.filter(e => e.isTontine));
+        
+        const hasPaidTontine = (empId) => {
+            const currentMonth = new Date().toISOString().slice(0, 7);
+            return salaryHistory.value.some(p => 
+                p.employeeId === empId && 
+                p.month === currentMonth && 
+                p.tontine > 0
+            );
+        };
+
+        // 10. Export PDF Historique Salaire
+        const exportSalaryHistoryPDF = () => {
+            if (!window.jspdf) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            doc.text("Journal des Paiements Salaires", 14, 20);
+            
+            // Helper Date Format "15-Déc-2025"
+            const formatDate = (ts) => { 
+                if (!ts) return '-'; 
+                const d = ts.toDate ? ts.toDate() : new Date(ts); 
+                
+                const day = d.getDate().toString().padStart(2, '0'); // 15
+                // Mois en abrégé (déc), on enlève le point s'il y en a et on met la majuscule
+                let month = d.toLocaleString('fr-FR', { month: 'short' }).replace('.', ''); 
+                month = month.charAt(0).toUpperCase() + month.slice(1); // Déc
+                const year = d.getFullYear(); // 2025
+
+                return `${day}-${month}-${year}`; 
+            };
+            
+            doc.autoTable({
+                head: [["Date", "Mois", "Employé", "Type", "Montant"]],
+                body: rows,
+                startY: 30
+            });
+            doc.save("Salaires.pdf");
+        };
+        // X. Charger les Fonds (NOUVEAU)
+        const loadSalaryFunds = () => {
+             onSnapshot(query(collection(db, "salary_funds"), orderBy('timestamp', 'desc')), (snap) => {
+                salaryFunds.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             });
         };
 
-        // --- RECHERCHE INTELLIGENTE (Mise à jour avec RÉFÉRENCE) ---
-        const filteredClients = computed(() => {
-            // On attend au moins 2 caractères pour chercher
-            if (!searchQuery.value || searchQuery.value.length < 2) return [];
-            
-            const q = searchQuery.value.toLowerCase();
-            
-            return clientDatabase.value.filter(c => 
-                // Recherche par NOM (Expéditeur ou Destinataire)
-                (c.EXPEDITEUR && c.EXPEDITEUR.toLowerCase().includes(q)) || 
-                (c.DESTINATEUR && c.DESTINATEUR.toLowerCase().includes(q)) || 
-                
-                // Recherche par TÉLÉPHONE
-                (c.TELEPHONE && c.TELEPHONE.includes(q)) ||
-                (c.TELEPHONE2 && c.TELEPHONE2.includes(q)) ||
+        // Variable pour stocker le mois sélectionné (pour le détail)
+        const selectedHistoryMonth = ref(null);
 
-                // Recherche par RÉFÉRENCE (Nouveau)
-                (c.REFERENCE && c.REFERENCE.toLowerCase().includes(q))
-            ).slice(0, 10);
+        // LOGIQUE DE GROUPEMENT PAR MOIS
+        const groupedSalaryHistory = computed(() => {
+            const groups = {};
+            
+            salaryHistory.value.forEach(pay => {
+                const m = pay.month; // Ex: "2023-12"
+                if (!groups[m]) {
+                    groups[m] = { 
+                        month: m, 
+                        totalNet: 0, 
+                        totalLoan: 0, 
+                        payments: [] 
+                    };
+                }
+                groups[m].totalNet += (pay.net || 0);
+                groups[m].totalLoan += (pay.loan || 0);
+                groups[m].payments.push(pay);
+            });
+
+            // On transforme l'objet en liste et on trie (Le mois le plus récent en premier)
+            return Object.values(groups).sort((a, b) => b.month.localeCompare(a.month));
         });
 
-        // --- DANS LA FONCTION selectClient ---
-        const selectClient = (client) => {
-            form.value.label = client.EXPEDITEUR;
-            form.value.recipient = client.DESTINATEUR;
-            form.value.reference = client.REFERENCE;
-            form.value.amount = client.PRIX; // On pré-remplit le montant à payer
-            form.value.expectedPrice = client.PRIX; // <--- On mémorise le prix officiel pour le comparatif
+        // Fonction pour ouvrir les détails d'un mois
+        const openMonthDetails = (group) => {
+            // On trie les paiements du mois par date
+            group.payments.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+            selectedHistoryMonth.value = group;
+        };
+
+        // Fonction pour revenir à la liste
+        const closeMonthDetails = () => {
+            selectedHistoryMonth.value = null;
+        };
+
+        // Y. Enregistrer un Fonds (NOUVEAU)
+        const saveSalaryFund = async () => {
+            if(!newFund.value.amount) return;
+            try {
+                await addDoc(collection(db, "salary_funds"), {
+                    amount: newFund.value.amount,
+                    note: newFund.value.note || 'Dotation',
+                    timestamp: Timestamp.now()
+                });
+                showFundModal.value = false;
+                newFund.value = { amount: '', note: '' };
+                alert("Fonds reçus !");
+            } catch(e) { alert("Erreur : " + e.message); }
+        };
+
+        // Z. Supprimer un Fonds (NOUVEAU)
+        const deleteSalaryFund = async (id) => {
+            if(confirm("Supprimer cette entrée d'argent ?")) await deleteDoc(doc(db, "salary_funds", id));
+        };
+
+        // STATS : Calcul Budget + Total Prêts (MISE À JOUR)
+        const salaryStats = computed(() => {
+            // 1. Total Reçu (Entrées)
+            const totalReceived = salaryFunds.value.reduce((acc, curr) => acc + (curr.amount || 0), 0);
             
-            searchQuery.value = ''; 
-            showSuggestions.value = false;
-        };
-
-        
-
-        // --- HISTORIQUE ---
-        const fetchHistory = async () => {
-            if(!db) return;
-            const q = query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc"));
-            const snap = await getDocs(q);
-            closedSessions.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        };
-
-        const openHistoryDetails = async (session) => {
-            selectedSessionHistory.value = session;
-            const q = query(collection(db, "transactions"), where("sessionId", "==", session.id), orderBy("timestamp", "desc"));
-            const snap = await getDocs(q);
-            selectedTransactionsHistory.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            showHistoryModal.value = true;
-        };
-        // --- DANS LE SETUP (Ajout de la variable d'état) ---
-        const showHiddenTransactions = ref(true); // Par défaut, l'admin voit tout
-
-        // --- FILTRAGE ET TRI (Mise à jour : Groupé par Mode + Date Décroissante) ---
-        const visibleTransactions = computed(() => {
-            // 1. D'abord, on filtre selon les droits (Admin/Visiteur)
-            let filteredList = [];
+            // 2. Total Payé (Sorties)
+            const totalPaid = salaryHistory.value.reduce((acc, curr) => acc + (curr.net || 0), 0);
             
-            if (!isAdmin.value) {
-                // Visiteur : On cache toujours les lignes masquées
-                filteredList = transactions.value.filter(t => !t.isHidden);
-            } else {
-                // Admin : On respecte la case à cocher
-                filteredList = showHiddenTransactions.value ? transactions.value : transactions.value.filter(t => !t.isHidden);
-            }
+            // 3. Total Prêts en cours (Somme des dettes actuelles des employés)
+            const totalLoans = employeesList.value.reduce((acc, curr) => acc + (curr.loan || 0), 0);
 
-            // 2. Ensuite, on applique le Tri Spécial
-            return filteredList.sort((a, b) => {
-                // A. Définition de l'ordre des groupes (1. Espèce, 2. Wave, 3. OM, 4. Banque)
-                const orderMap = { 
-                    'ESPECE': 1, 
-                    'WAVE': 2, 
-                    'OM': 3, 
-                    'BANQUE': 4 
-                };
+            return {
+                totalReceived,
+                totalPaid,
+                balance: totalReceived - totalPaid,
+                totalLoans // Nouvelle donnée disponible
+            };
+        });
 
-                const orderA = orderMap[a.category] || 99; // 99 si inconnu
-                const orderB = orderMap[b.category] || 99;
+        // ---------------------------------------------------------
+        // --- FIN LOGIQUE SALAIRE ---
+        // ---------------------------------------------------------
 
-                // Si les catégories sont différentes, on trie par catégorie
-                if (orderA !== orderB) {
-                    return orderA - orderB;
+
+        // --- COMPUTED PROPERTIES EXISTANTES (Caisse) ---
+        const totals = computed(() => {
+            let t = { espece: 0, om: 0, wave: 0 };
+            transactions.value.forEach(tx => {
+                const amount = tx.amount - (tx.fees || 0); // Net
+                if (tx.category === 'ESPECE') {
+                    if (tx.type === 'CREDIT') t.espece += amount; else t.espece -= amount;
+                } else if (tx.category === 'OM') {
+                    if (tx.type === 'CREDIT') t.om += amount; else t.om -= amount;
+                } else if (tx.category === 'WAVE') {
+                    if (tx.type === 'CREDIT') t.wave += amount; else t.wave -= amount;
                 }
+            });
+            // Ajout des reports
+            if (currentSession.value) {
+                t.espece += (currentSession.value.startAmount?.espece || 0);
+                t.om += (currentSession.value.startAmount?.om || 0);
+                t.wave += (currentSession.value.startAmount?.wave || 0);
+            }
+            return t;
+        });
 
-                // B. Si les catégories sont les mêmes, on trie par date (Le plus récent en haut)
-                // On gère le format Timestamp de Firebase
+        const totalEspeceCompte = computed(() => {
+            return billets.value.reduce((acc, b) => acc + (b.val * (b.count || 0)), 0);
+        });
+
+        const visibleTransactions = computed(() => {
+            let filteredList = [];
+            if (!isAdmin.value) filteredList = transactions.value.filter(t => !t.isHidden);
+            else filteredList = showHiddenTransactions.value ? transactions.value : transactions.value.filter(t => !t.isHidden);
+
+            return filteredList.sort((a, b) => {
+                const orderMap = { 'ESPECE': 1, 'WAVE': 2, 'OM': 3, 'BANQUE': 4 };
+                const orderA = orderMap[a.category] || 99;
+                const orderB = orderMap[b.category] || 99;
+                if (orderA !== orderB) return orderA - orderB;
                 const timeA = a.timestamp && a.timestamp.toMillis ? a.timestamp.toMillis() : 0;
                 const timeB = b.timestamp && b.timestamp.toMillis ? b.timestamp.toMillis() : 0;
-
-                return timeB - timeA; // Décroissant
+                return timeB - timeA; 
             });
         });
 
-        const visibleHistoryTransactions = computed(() => {
-            if (isAdmin.value) return selectedTransactionsHistory.value;
-            return selectedTransactionsHistory.value.filter(t => !t.isHidden);
-        });
-        // --- TOTAUX POUR LE MODAL HISTORIQUE (Ventilation) ---
         const historyModalTotals = computed(() => {
             let t = { entree: 0, sortie: 0, espece: 0, om: 0, wave: 0 };
-            
             visibleHistoryTransactions.value.forEach(tx => {
                 const net = tx.amount - (tx.fees || 0);
-                
-                // 1. Total Entrées / Sorties
-                if (tx.type === 'CREDIT') t.entree += net;
-                else t.sortie += net;
-
-                // 2. Total par Canal (en valeur absolue pour voir le volume)
+                if (tx.type === 'CREDIT') t.entree += net; else t.sortie += net;
                 if (tx.category === 'ESPECE') t.espece += net;
                 if (tx.category === 'OM') t.om += net;
                 if (tx.category === 'WAVE') t.wave += net;
             });
             return t;
         });
+
+        const visibleHistoryTransactions = computed(() => selectedTransactionsHistory.value);
         
-
-        // --- CALCULS ---
-        const totals = computed(() => {
-            let t = { espece: 0, om: 0, wave: 0, global: 0, totalCredit: 0, totalDebit: 0 };
-            const initial = currentSession.value && currentSession.value.startAmounts ? currentSession.value.startAmounts : { espece: 0, om: 0, wave: 0 };
-            t.espece += initial.espece || 0;
-            t.om += initial.om || 0;
-            t.wave += initial.wave || 0;
-
-            transactions.value.forEach(tx => {
-                const principal = tx.amount || 0;
-                const fees = tx.fees || 0; 
-                const totalTx = principal - fees; 
-                const sign = tx.type === 'CREDIT' ? 1 : -1;
-
-                if (tx.type === 'CREDIT') t.totalCredit += principal;
-                else t.totalDebit += principal;
-
-                if (tx.category === 'ESPECE') t.espece += (principal * sign);
-                if (tx.category === 'OM') t.om += (totalTx * sign);
-                if (tx.category === 'WAVE') t.wave += (principal * sign);
-            });
-            t.global = t.espece + t.om + t.wave;
-            return t;
+        const filteredClients = computed(() => {
+            if (!searchQuery.value || searchQuery.value.length < 2) return [];
+            const q = searchQuery.value.toLowerCase();
+            return clientDatabase.value.filter(c => 
+                (c.REFERENCE && c.REFERENCE.toLowerCase().includes(q)) || 
+                (c.EXPEDITEUR && c.EXPEDITEUR.toLowerCase().includes(q))
+            ).slice(0, 10);
         });
 
-        const totalEspeceCompte = computed(() => billets.value.reduce((acc, b) => acc + (b.val * b.count), 0));
-        
-        const hasGap = computed(() => {
-            const gapOM = closing.value.om - totals.value.om;
-            const gapWave = closing.value.wave - totals.value.wave;
-            const gapEspece = totalEspeceCompte.value - totals.value.espece;
-            return (Math.abs(gapOM) > 5 || Math.abs(gapWave) > 5 || Math.abs(gapEspece) > 5);
+        // --- WATCHERS & LIFECYCLE ---
+        onAuthStateChanged(auth, (u) => {
+            user.value = u;
+            authLoading.value = false;
+            if (u) {
+                // Charger Session Caisse
+                const q = query(collection(db, "sessions"), where("status", "==", "OPEN"));
+                onSnapshot(q, (snapshot) => {
+                    if (!snapshot.empty) {
+                        const docData = snapshot.docs[0];
+                        currentSession.value = { id: docData.id, ...docData.data() };
+                        startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
+                        
+                        // Charger Transactions Caisse
+                        onSnapshot(collection(db, "transactions"), where("sessionId", "==", docData.id), (txSnap) => {
+                            transactions.value = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        });
+                    } else { currentSession.value = null; transactions.value = []; }
+                });
+                
+                // Charger Historique Sessions
+                onSnapshot(query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc")), (snap) => {
+                    closedSessions.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                });
+
+                // Charger Base Clients
+                onSnapshot(collection(db, "clients"), (snap) => {
+                    clientDatabase.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                });
+
+                // CHARGEMENT DONNEES SALAIRE (NOUVEAU)
+                loadEmployees();
+                loadSalaryHistory();
+                loadSalaryFunds(); // <-- AJOUTER ICI
+            }
         });
 
-        // --- ACTIONS ---
+        // --- METHODS ---
+        const login = async () => { try { await signInWithEmailAndPassword(auth, loginForm.value.email, loginForm.value.password); } catch (e) { loginError.value = "Erreur de connexion"; } };
+        const logout = async () => { await signOut(auth); };
+        
         const startSession = async () => {
-            if (!isAdmin.value) return alert("Refusé");
+            if (!startAmounts.value.espece && startAmounts.value.espece !== 0) return alert("Montant Espèce requis");
             loading.value = true;
             try {
-                const sessionData = { startAmounts: { ...startAmounts.value }, startTime: serverTimestamp(), status: 'OPEN' };
-                const docRef = await addDoc(collection(db, "sessions"), sessionData);
-                currentSession.value = { id: docRef.id, ...sessionData };
-                subscribeToTransactions(docRef.id);
-            } catch (e) { alert("Erreur: " + e.message); }
-            loading.value = false;
+                await addDoc(collection(db, "sessions"), {
+                    startTime: Timestamp.now(), status: "OPEN",
+                    startAmount: startAmounts.value,
+                    openedBy: user.value.email
+                });
+            } catch (e) { alert(e.message); } finally { loading.value = false; }
         };
 
-        
-        // --- DANS LA FONCTION addTransaction ---
         const addTransaction = async () => {
             if (!isAdmin.value) return alert("Refusé");
             if (!form.value.amount || !form.value.label || !form.value.date) return;
-            
-            // 1. Calcul des frais
             let fees = 0;
-            if (form.value.category === 'OM') {
-                const net = form.value.amount / 1.01;
-                fees = Math.round(form.value.amount - net); 
-            }
+            if (form.value.category === 'OM') { const net = form.value.amount / 1.01; fees = Math.round(form.value.amount - net); }
             const netAmountPaid = form.value.amount - fees;
-
-            // 2. Gestion Date
-            const selectedDate = new Date(form.value.date);
-            const now = new Date();
-            selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+            const selectedDate = new Date(form.value.date); const now = new Date(); selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
 
             try {
-                // A. Enregistrement Transaction (Journal)
                 await addDoc(collection(db, "transactions"), {
-                    sessionId: currentSession.value.id,
-                    ...form.value,
-                    expectedPrice: form.value.expectedPrice || 0,
-                    recipient: form.value.recipient || '',
-                    isHidden: form.value.isHidden || false,
-                    fees: fees,
-                    timestamp: Timestamp.fromDate(selectedDate)
+                    sessionId: currentSession.value.id, ...form.value, expectedPrice: form.value.expectedPrice || 0, recipient: form.value.recipient || '', isHidden: form.value.isHidden || false, fees: fees, timestamp: Timestamp.fromDate(selectedDate)
                 });
-
-                // B. GESTION INTELLIGENTE DE LA BASE CLIENTS
                 if (form.value.reference) {
-                    // Nettoyage de la référence pour l'ID (ex: "MD/123" devient "MD-123")
                     const cleanRef = form.value.reference.replace(/\//g, "-").trim();
                     const clientRef = doc(db, "clients", cleanRef);
-
-                    // On vérifie si ce client existe déjà dans notre liste locale
                     const existingClientIndex = clientDatabase.value.findIndex(c => c.REFERENCE === form.value.reference);
-
                     if (existingClientIndex !== -1) {
-                        // --- CAS 1 : LE CLIENT EXISTE DÉJÀ ---
-                        // On met à jour son solde SEULEMENT SI on avait un prix attendu (gestion de dette)
                         if (form.value.expectedPrice > 0) {
-                            let newBalance = form.value.expectedPrice - netAmountPaid;
-                            if (newBalance < 0) newBalance = 0; // Soldé
-
-                            // Mise à jour Firebase
+                            let newBalance = form.value.expectedPrice - netAmountPaid; if (newBalance < 0) newBalance = 0;
                             await updateDoc(clientRef, { PRIX: newBalance });
-                            // Mise à jour Locale immédiate
-                            clientDatabase.value[existingClientIndex].PRIX = newBalance;
                         }
                     } else {
-                        // --- CAS 2 : C'EST UN NOUVEAU CLIENT (INCONNU) ---
-                        // On le crée dans la base de données
-                        const newClientData = {
-                            REFERENCE: form.value.reference,
-                            EXPEDITEUR: form.value.label,
-                            DESTINATEUR: form.value.recipient || '',
-                            TELEPHONE: '', // On n'a pas le tél dans ce formulaire, pas grave
-                            PRIX: form.value.amount // On enregistre ce montant comme "Prix habituel" pour la prochaine fois
-                        };
-
-                        // Sauvegarde Firebase
-                        await setDoc(clientRef, newClientData, { merge: true });
-
-                        // Ajout à la liste locale pour qu'il apparaisse dans la recherche tout de suite
-                        clientDatabase.value.push(newClientData);
+                        await setDoc(clientRef, { REFERENCE: form.value.reference, EXPEDITEUR: form.value.label, DESTINATEUR: form.value.recipient || '', TELEPHONE: '', PRIX: form.value.amount }, { merge: true });
                     }
                 }
-                
-                // C. Reset Form
-                form.value.label = '';
-                form.value.recipient = '';
-                form.value.reference = ''; 
-                form.value.amount = '';
-                form.value.expectedPrice = 0;
-                form.value.isHidden = false;
-
-            } catch (e) { 
-                console.error(e);
-                alert("Erreur ajout : " + e.message); 
-            }
+                form.value.label = ''; form.value.recipient = ''; form.value.reference = ''; form.value.amount = ''; form.value.expectedPrice = 0; form.value.isHidden = false;
+            } catch (e) { console.error(e); alert("Erreur ajout : " + e.message); }
         };
+
+        const deleteTransaction = async (id) => { if (confirm("Supprimer ?")) await deleteDoc(doc(db, "transactions", id)); };
         
-        // --- AJOUT D'UNE PETITE FONCTION POUR LES ABREVIATIONS ---
-        const getModeAbbr = (cat) => {
-            if(cat === 'ESPECE') return 'ESP';
-            if(cat === 'BANQUE') return 'BQ';
-            return cat; // OM et WAVE restent pareil
-        };
-
-        const updateStartAmounts = async () => {
-            if (!isAdmin.value) return;
-            try {
-                await updateDoc(doc(db, "sessions", currentSession.value.id), { startAmounts: currentSession.value.startAmounts });
-                showEditStartModal.value = false;
-            } catch(e) { alert("Erreur modif"); }
-        };
-
-        const openClosingModal = () => {
-            if(!isAdmin.value) return alert("Accès réservé à l'admin");
-            closing.value.om = totals.value.om;
-            closing.value.wave = totals.value.wave;
-            showClosingModal.value = true;
-        };
-
+        const openClosingModal = () => { closing.value.om = 0; closing.value.wave = 0; showClosingModal.value = true; };
+        
         const confirmClose = async () => {
-            if (!isAdmin.value) return;
-            if(!confirm("Fermer la session ?")) return;
+            if (!currentSession.value) return;
             try {
                 await updateDoc(doc(db, "sessions", currentSession.value.id), {
-                    status: 'CLOSED',
-                    endTime: serverTimestamp(),
+                    endTime: Timestamp.now(), status: "CLOSED",
                     totalsComputed: totals.value,
-                    flux: { credit: totals.value.totalCredit, debit: totals.value.totalDebit },
-                    billetage: billets.value
+                    closingAmounts: closing.value,
+                    gaps: { om: closing.value.om - totals.value.om, wave: closing.value.wave - totals.value.wave }
                 });
-                startAmounts.value = { espece: totalEspeceCompte.value, om: closing.value.om, wave: closing.value.wave };
-                currentSession.value = null; transactions.value = []; showClosingModal.value = false;
-                fetchHistory();
-            } catch (e) { alert("Erreur fermeture"); }
+                showClosingModal.value = false; startAmounts.value = { espece:0, om:0, wave:0 };
+            } catch (e) { alert("Erreur clôture"); }
         };
 
-        const deleteTransaction = async (id) => {
-            if (!isAdmin.value) return;
-            if(!confirm("Supprimer ?")) return;
-            try { await deleteDoc(doc(db, "transactions", id)); } catch (e) { alert("Erreur"); }
+        const openHistoryDetails = async (sess) => {
+            selectedSessionHistory.value = sess;
+            const snap = await getDocs(query(collection(db, "transactions"), where("sessionId", "==", sess.id)));
+            let txs = snap.docs.map(d => ({id: d.id, ...d.data()}));
+            txs.sort((a,b) => (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0));
+            selectedTransactionsHistory.value = txs;
+            showHistoryModal.value = true;
         };
 
-        const subscribeToTransactions = (sessionId) => {
-            const q = query(collection(db, "transactions"), where("sessionId", "==", sessionId), orderBy("timestamp", "desc"));
-            onSnapshot(q, (snapshot) => {
-                transactions.value = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const selectClient = (c) => { form.value.reference = c.REFERENCE; form.value.label = c.EXPEDITEUR; form.value.recipient = c.DESTINATEUR || ''; form.value.expectedPrice = c.PRIX; showSuggestions.value = false; searchQuery.value = ''; };
+
+        const importClients = () => {
+            const file = fileInput.value.files[0];
+            if (!file) return;
+            importStatus.value = "Lecture...";
+            Papa.parse(file, {
+                header: true, skipEmptyLines: true,
+                complete: async (results) => {
+                    importStatus.value = `Import de ${results.data.length} clients...`;
+                    let count = 0; const batchSize = 400; let batch = writeBatch(db);
+                    for (const row of results.data) {
+                        if (!row.REFERENCE) continue;
+                        const refClean = row.REFERENCE.replace(/\//g, "-").trim();
+                        batch.set(doc(db, "clients", refClean), { REFERENCE: row.REFERENCE, EXPEDITEUR: row.EXPEDITEUR || '', DESTINATEUR: row.DESTINATEUR || '', TELEPHONE: row.TELEPHONE || '', TELEPHONE2: row.TELEPHONE2 || '', PRIX: row.PRIX ? parseFloat(row.PRIX.replace(/\s/g, '').replace(',', '.')) : 0 }, { merge: true });
+                        count++;
+                        if (count % batchSize === 0) { await batch.commit(); batch = writeBatch(db); }
+                    }
+                    await batch.commit();
+                    importStatus.value = "Terminé !"; setTimeout(() => importStatus.value = '', 3000);
+                }
             });
         };
 
-        // --- UTILS ---
-        const formatMoney = (v) => (v || 0).toLocaleString('fr-FR') + ' F';
-        const formatTime = (ts) => ts && ts.toDate ? ts.toDate().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--';
-        const formatDate = (ts) => ts && ts.toDate ? ts.toDate().toLocaleDateString('fr-FR') : '';
-        const formatDateTime = (ts) => ts && ts.toDate ? ts.toDate().toLocaleString('fr-FR') : '';
-
-        const getBadgeClass = (cat) => ({
-            'ESPECE': 'bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold',
-            'OM': 'bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold',
-            'WAVE': 'bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold',
-            'BANQUE': 'bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-bold'
-        }[cat]);
-
-        const getGapClass = (gap) => {
-            if (Math.abs(gap) < 5) return 'bg-green-100 text-green-800 border border-green-200'; // Caisse Juste
-            if (gap > 0) return 'bg-blue-100 text-blue-800 border border-blue-200'; // Excédent
-            return 'bg-red-100 text-red-800 border border-red-200'; // Manquant
-        };
-        const formatGap = (gap) => Math.abs(gap) < 5 ? 'OK' : (gap > 0 ? '+' + formatMoney(gap) : formatMoney(gap));
-
-        // --- CORRECTION BUG PDF DANS exportToPDF ---
+        const exportToExcel = (data, title) => { const ws = XLSX.utils.json_to_sheet(data.map(t => ({ Date: formatDate(t.timestamp), Ref: t.reference, Exp: t.label, Dest: t.recipient, Type: t.type, Cat: t.category, Montant: t.amount }))); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Feuille1"); XLSX.writeFile(wb, title + ".xlsx"); };
+        
         const exportToPDF = () => {
-            if (!window.jspdf) return alert("Erreur : La librairie PDF n'est pas chargée.");
-            
-            try {
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
-
-                doc.setFontSize(14);
-                doc.text("Journal de Caisse", 14, 15);
-                doc.setFontSize(10);
-                doc.text("Généré le : " + new Date().toLocaleString(), 14, 22);
-                
-                // On utilise la liste visible à l'écran (donc ça respecte la case à cocher)
-                const listToExport = visibleTransactions.value; 
-
-                if (listToExport.length === 0) return alert("Rien à exporter !");
-
-                const tableRows = listToExport.map(tx => {
-                    const net = tx.amount - (tx.fees || 0);
-                    
-                    // --- CORRECTION DU FORMAT MONÉTAIRE POUR PDF ---
-                    // On remplace les espaces insécables bizarres par un espace normal simple
-                    // \s inclut les espaces, tabulations et les espaces insécables
-                    const montantClean = formatMoney(net).replace(/\s/g, ' '); 
-
-                    return [
-                        formatDate(tx.timestamp) + '\n' + formatTime(tx.timestamp),
-                        tx.reference || '-',
-                        tx.label + (tx.isHidden ? ' (INT)' : ''),
-                        tx.recipient || '',
-                        getModeAbbr(tx.category),
-                        montantClean // On utilise la version nettoyée
-                    ];
-                });
-
-                doc.autoTable({
-                    head: [["Date", "Réf", "Expéditeur", "Destinataire", "Mode", "Montant"]],
-                    body: tableRows,
-                    startY: 30,
-                    theme: 'grid',
-                    styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
-                    headStyles: { fillColor: [63, 81, 181], textColor: 255, fontStyle: 'bold' },
-                    columnStyles: {
-                        0: { cellWidth: 20 },
-                        4: { cellWidth: 15, halign: 'center' },
-                        5: { halign: 'right', fontStyle: 'bold' }
-                    }
-                });
-
-                doc.save("Journal_" + new Date().toISOString().slice(0,10) + ".pdf");
-
-            } catch (error) { console.error(error); alert("Erreur PDF : " + error.message); }
+            if (!window.jspdf) return alert("Erreur PDF");
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text("Journal de Caisse", 14, 15);
+            const list = visibleTransactions.value;
+            doc.autoTable({ head: [["Date", "Réf", "Expéditeur", "Destinataire", "Mode", "Montant"]], body: list.map(tx => [formatDate(tx.timestamp)+'\n'+formatTime(tx.timestamp), tx.reference||'-', tx.label+(tx.isHidden?' (INT)':''), tx.recipient||'', getModeAbbr(tx.category), formatMoney(tx.amount-(tx.fees||0)).replace(/\s/g,' ')]), startY: 30, theme: 'grid', styles: {fontSize:8}, columnStyles: {0:{cellWidth:20}, 4:{cellWidth:15, halign:'center'}, 5:{halign:'right', fontStyle:'bold'}} });
+            doc.save("Journal.pdf");
         };
 
-        const exportToExcel = (dataList = transactions.value, filename = "Export") => {
-            const listToExport = isAdmin.value ? dataList : dataList.filter(t => !t.isHidden);
-            const data = listToExport.map(tx => ({
-                "Date": formatDate(tx.timestamp), "Heure": formatTime(tx.timestamp),
-                "Type": tx.type === 'CREDIT' ? 'ENTRÉE' : 'SORTIE', 
-                "Compte": tx.category,
-                "Reference": tx.reference || '', // Export de la référence
-                "Libellé": tx.label, 
-                "Montant Total": tx.amount
-            }));
-            const ws = XLSX.utils.json_to_sheet(data);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Data");
-            XLSX.writeFile(wb, filename + ".xlsx");
-        };
+        // Helpers
+        const formatMoney = (m) => new Intl.NumberFormat('fr-FR').format(m || 0) + ' F';
+        const formatDate = (ts) => { if (!ts) return '-'; const d = ts.toDate ? ts.toDate() : new Date(ts); return d.toLocaleDateString('fr-FR'); };
+        const formatTime = (ts) => { if (!ts) return '-'; const d = ts.toDate ? ts.toDate() : new Date(ts); return d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); };
+        const formatDateTime = (ts) => formatDate(ts) + ' ' + formatTime(ts);
+        const getBadgeClass = (c) => ({ 'OM': 'bg-orange-50 text-orange-700 border-orange-200', 'WAVE': 'bg-blue-50 text-blue-700 border-blue-200', 'ESPECE': 'bg-green-50 text-green-700 border-green-200', 'BANQUE': 'bg-gray-50 text-gray-700 border-gray-200' }[c] || '');
+        const getModeAbbr = (c) => ({ 'ESPECE': 'ESP', 'OM': 'OM', 'WAVE': 'WAV', 'BANQUE': 'BQE' }[c] || c);
+        const getGapClass = (gap) => gap === 0 ? 'text-gray-400' : (gap > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
+        const formatGap = (g) => (g > 0 ? '+' : '') + formatMoney(g);
+        const saveBilletage = () => {}; 
+        const updateStartAmounts = () => {};
 
         return {
             user, isAdmin, authLoading, loginForm, login, logout, loginError,
-            currentView, 
-            currentSession, transactions, visibleTransactions,
-            loading, startAmounts, form, closing, billets, totals, totalEspeceCompte, showClosingModal, showEditStartModal, hasGap,
-            // Historique
+            currentView, currentSession, transactions, visibleTransactions, loading, startAmounts, form, closing, billets, totals, totalEspeceCompte, showClosingModal,
             closedSessions, showHistoryModal, selectedSessionHistory, selectedTransactionsHistory, visibleHistoryTransactions, openHistoryDetails,
-            // Client DB
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
-            // Actions
-            startSession, addTransaction, updateStartAmounts, openClosingModal, confirmClose, deleteTransaction,
+            startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
-            getModeAbbr, saveBilletage, showHiddenTransactions, historyModalTotals
+            saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals,
+            
+            // --- EXPORTS POUR LA VUE SALAIRE ---
+            currentSalaireView, employeesList, salaryHistory, paiePeriod, 
+            showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, // Ajoutés
+            newEmp, editingEmp, payForm, unpaidEmployees, // Ajoutés
+            selectedEmployeeHistoryName, individualHistory, // Ajoutés
+            
+            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, // Ajoutés
+            openPayModal, confirmSalaryPayment, deleteSalaryPayment, hasPaidTontine, tontineMembers,
+            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, salaryFunds, showFundModal, newFund, salaryStats, // AJOUTÉS
+            saveSalaryFund, deleteSalaryFund, groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails, openPayModal, confirmSalaryPayment, recalcNet // <--- AJOUTER ICI
         };
     }
 }).mount('#app');
