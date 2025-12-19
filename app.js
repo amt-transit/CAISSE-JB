@@ -36,7 +36,7 @@ createApp({
         const transactions = ref([]);
         const loading = ref(false);
         const startAmounts = ref({ espece: 0, om: 0, wave: 0 });
-        const form = ref({ type: 'CREDIT', category: 'ESPECE', amount: '', label: '', recipient: '', reference: '', date: new Date().toISOString().split('T')[0], expectedPrice: 0, isHidden: false });
+        const form = ref({ type: 'CREDIT', category: 'ESPECE', amount: '', label: '', recipient: '', reference: '', date: new Date().toISOString().split('T')[0], expectedPrice: 0, isHidden: false, isBill: false });
         const closing = ref({ om: 0, wave: 0 });
         const showClosingModal = ref(false);
         const billets = ref([ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ]);
@@ -541,29 +541,80 @@ createApp({
         const addTransaction = async () => {
             if (!isAdmin.value) return alert("Refusé");
             if (!form.value.amount || !form.value.label || !form.value.date) return;
+            
+            // --- LOGIQUE DES FRAIS (MODE IVOIRE) ---
             let fees = 0;
-            if (form.value.category === 'OM') { const net = form.value.amount / 1.01; fees = Math.round(form.value.amount - net); }
-            const netAmountPaid = form.value.amount - fees;
-            const selectedDate = new Date(form.value.date); const now = new Date(); selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+            const amount = form.value.amount;
+
+            if (form.value.isBill) {
+                // Règle 1 : Si c'est une facture, c'est GRATUIT pour tous
+                fees = 0;
+            } else {
+                if (form.value.category === 'OM') {
+                    // ORANGE MONEY
+                    if (form.value.type === 'CREDIT') {
+                        // Entrée OM : On déduit 1% (Car retrait futur payant)
+                        fees = Math.round(amount * 0.01);
+                    } else {
+                        // Sortie OM : 0% (Car envoi national gratuit)
+                        fees = 0;
+                    }
+                } else if (form.value.category === 'WAVE') {
+                    // WAVE
+                    if (form.value.type === 'CREDIT') {
+                        // Entrée Wave : 0% (Car retrait gratuit)
+                        fees = 0;
+                    } else {
+                        // Sortie Wave : 1% (Car envoi payant) - Plafonné à 5000 F
+                        let calc = Math.round(amount * 0.01);
+                        if (calc > 5000) calc = 5000;
+                        fees = calc;
+                    }
+                }
+            }
+
+            const netAmountPaid = amount - fees;
+            const selectedDate = new Date(form.value.date); 
+            const now = new Date(); 
+            selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
 
             try {
                 await addDoc(collection(db, "transactions"), {
-                    sessionId: currentSession.value.id, ...form.value, expectedPrice: form.value.expectedPrice || 0, recipient: form.value.recipient || '', isHidden: form.value.isHidden || false, fees: fees, timestamp: Timestamp.fromDate(selectedDate)
+                    sessionId: currentSession.value.id, 
+                    ...form.value, 
+                    expectedPrice: form.value.expectedPrice || 0, 
+                    recipient: form.value.recipient || '', 
+                    isHidden: form.value.isHidden || false, 
+                    isBill: form.value.isBill || false, // On sauvegarde si c'est une facture
+                    fees: fees, 
+                    timestamp: Timestamp.fromDate(selectedDate)
                 });
+                
+                // Gestion Client (Mise à jour solde colis si besoin)
                 if (form.value.reference) {
                     const cleanRef = form.value.reference.replace(/\//g, "-").trim();
                     const clientRef = doc(db, "clients", cleanRef);
                     const existingClientIndex = clientDatabase.value.findIndex(c => c.REFERENCE === form.value.reference);
                     if (existingClientIndex !== -1) {
                         if (form.value.expectedPrice > 0) {
-                            let newBalance = form.value.expectedPrice - netAmountPaid; if (newBalance < 0) newBalance = 0;
+                            let newBalance = form.value.expectedPrice - netAmountPaid; 
+                            if (newBalance < 0) newBalance = 0;
                             await updateDoc(clientRef, { PRIX: newBalance });
                         }
                     } else {
                         await setDoc(clientRef, { REFERENCE: form.value.reference, EXPEDITEUR: form.value.label, DESTINATEUR: form.value.recipient || '', TELEPHONE: '', PRIX: form.value.amount }, { merge: true });
                     }
                 }
-                form.value.label = ''; form.value.recipient = ''; form.value.reference = ''; form.value.amount = ''; form.value.expectedPrice = 0; form.value.isHidden = false;
+                
+                // Reset Formulaire
+                form.value.label = ''; 
+                form.value.recipient = ''; 
+                form.value.reference = ''; 
+                form.value.amount = ''; 
+                form.value.expectedPrice = 0; 
+                form.value.isHidden = false;
+                form.value.isBill = false; // Reset case facture
+
             } catch (e) { console.error(e); alert("Erreur ajout : " + e.message); }
         };
 
