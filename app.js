@@ -297,7 +297,11 @@ createApp({
         const filteredClients = computed(() => {
             if (!searchQuery.value || searchQuery.value.length < 2) return [];
             const q = searchQuery.value.toLowerCase();
-            return clientDatabase.value.filter(c => (c.REFERENCE?.toLowerCase().includes(q)) || (c.EXPEDITEUR?.toLowerCase().includes(q))).slice(0, 10);
+            return clientDatabase.value.filter(c => 
+                (c.REFERENCE?.toLowerCase().includes(q)) || 
+                (c.EXPEDITEUR?.toLowerCase().includes(q)) || 
+                (c.DESTINATEUR?.toLowerCase().includes(q)) // <--- AJOUTÉ ICI
+            ).slice(0, 10);
         });
 
         // WATCHERS
@@ -347,20 +351,54 @@ createApp({
             const selectedDate = new Date(form.value.date); const now = new Date(); selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
 
             try {
+                // 1. Enregistrement Transaction
                 await addDoc(collection(db, "transactions"), { sessionId: currentSession.value.id, ...form.value, expectedPrice: form.value.expectedPrice || 0, recipient: form.value.recipient || '', isHidden: form.value.isHidden || false, isBill: form.value.isBill || false, fees: fees, timestamp: Timestamp.fromDate(selectedDate) });
                 
-                // GESTION DETTE CLIENT (REDUCTION)
-                if (form.value.reference) {
-                    const cleanRef = form.value.reference.replace(/\//g, "-").trim();
+                // 2. GESTION CLIENT / PRESTATAIRE (AUTO-APPRENTISSAGE)
+                
+                // On détermine l'identifiant (Priorité : Référence > Destinataire)
+                let contactKey = form.value.reference;
+                
+                // Si pas de référence, on génère une clé basée sur le Destinataire (ex: "PLOMBIERJEAN")
+                if (!contactKey && form.value.recipient) {
+                    contactKey = form.value.recipient.toUpperCase().replace(/[^A-Z0-9]/g, ''); 
+                }
+
+                if (contactKey) {
+                    const cleanRef = contactKey.replace(/\//g, "-").trim();
                     const clientRef = doc(db, "clients", cleanRef);
-                    const existingClient = clientDatabase.value.find(c => c.REFERENCE === form.value.reference);
+                    
+                    // On regarde dans la liste locale si ce client existe déjà
+                    const existingClient = clientDatabase.value.find(c => c.id === cleanRef);
+
                     if (existingClient) {
+                        // IL EXISTE DÉJÀ : On met à jour son solde
                         const currentDebt = existingClient.PRIX || 0;
                         await updateDoc(clientRef, { PRIX: currentDebt - netAmountPaid });
                     } else {
-                        await setDoc(clientRef, { REFERENCE: form.value.reference, EXPEDITEUR: form.value.label, DESTINATEUR: form.value.recipient || '', TELEPHONE: '', PRIX: form.value.amount }, { merge: true });
+                        // NOUVEAU : On le crée
+                        // Si c'est une création via le Destinataire (pas de vraie ref), la dette commence à 0 
+                        // car on suppose que c'est un prestataire qu'on paie, pas une dette qu'il nous doit.
+                        // Si c'est une création via Référence, c'est une dette classique.
+                        const initialDebt = form.value.reference ? form.value.amount : 0;
+                        
+                        await setDoc(clientRef, { 
+                            REFERENCE: form.value.reference || contactKey, // On sauvegarde la clé générée si pas de ref
+                            EXPEDITEUR: form.value.label, 
+                            DESTINATEUR: form.value.recipient || '', 
+                            TELEPHONE: '', 
+                            PRIX: initialDebt 
+                        }, { merge: true });
+
+                        // Si c'est un prestataire (créé sans Ref), on applique tout de suite le mouvement
+                        // Exemple : Plombier créé à 0, on le paie 10.000 -> Son solde devient -10.000 (ce qui est correct pour une dépense)
+                        if (!form.value.reference) {
+                             await updateDoc(clientRef, { PRIX: 0 - netAmountPaid });
+                        }
                     }
                 }
+                
+                // Reset Formulaire
                 form.value.label = ''; form.value.recipient = ''; form.value.reference = ''; form.value.amount = ''; form.value.expectedPrice = 0; form.value.isHidden = false; form.value.isBill = false;
             } catch (e) { console.error(e); alert("Erreur ajout : " + e.message); }
         };
