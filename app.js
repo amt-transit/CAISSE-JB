@@ -52,6 +52,7 @@ createApp({
         const showEditTransactionModal = ref(false); // NOUVEAU
         const editingTx = ref({}); // NOUVEAU (Données en cours de modif)
         const originalTxState = ref({}); // NOUVEAU (Pour se souvenir de l'état avant modif)
+        const historySearchQuery = ref('');
         
         // --- DONNEES DATABASE CLIENT ---
         const clientDatabase = ref([]);
@@ -328,6 +329,20 @@ createApp({
                 loadEmployees(); loadSalaryHistory(); loadSalaryFunds();
             }
         });
+        // Filtre pour l'historique des sessions
+        const filteredHistory = computed(() => {
+            if (!historySearchQuery.value) return closedSessions.value;
+            const q = historySearchQuery.value.toLowerCase();
+            
+            return closedSessions.value.filter(s => {
+                // On cherche dans la date formatée
+                const dateStr = formatDateTime(s.endTime).toLowerCase();
+                // On cherche aussi dans le solde espèce (pour retrouver un montant précis)
+                const totalEsp = s.totalsComputed?.espece?.toString() || '';
+                
+                return dateStr.includes(q) || totalEsp.includes(q);
+            });
+        });
         // --- LOGIQUE MODIFICATION TRANSACTION (NOUVEAU) ---
 
         // 1. Ouvrir le modal et préparer les données
@@ -347,6 +362,76 @@ createApp({
             showSuggestions.value = false; // On cache la liste au début
             showEditTransactionModal.value = true;
         };
+        // --- RECHERCHE GLOBALE HISTORIQUE ---
+        const globalSearchResults = ref([]);
+        const isSearchingGlobal = ref(false);
+
+        const performGlobalSearch = async () => {
+            const q = historySearchQuery.value.trim();
+            
+            // Si vide, on revient à l'affichage des sessions
+            if (!q) {
+                isSearchingGlobal.value = false;
+                return;
+            }
+
+            isSearchingGlobal.value = true;
+            globalSearchResults.value = [];
+            const results = new Map(); // Utilise un Map pour éviter les doublons
+
+            try {
+                // 1. Recherche par DATE (Si le format ressemble à une date)
+                // On essaie de convertir la recherche en date
+                const dateObj = new Date(q);
+                if (!isNaN(dateObj.getTime())) {
+                    // On cherche du début à la fin de cette journée
+                    const startOfDay = new Date(dateObj); startOfDay.setHours(0,0,0,0);
+                    const endOfDay = new Date(dateObj); endOfDay.setHours(23,59,59,999);
+                    
+                    const qDate = query(collection(db, "transactions"), 
+                        where("timestamp", ">=", Timestamp.fromDate(startOfDay)),
+                        where("timestamp", "<=", Timestamp.fromDate(endOfDay))
+                    );
+                    const snapDate = await getDocs(qDate);
+                    snapDate.forEach(doc => results.set(doc.id, { id: doc.id, ...doc.data() }));
+                }
+
+                // 2. Recherche TEXTE (Référence, Expéditeur, Destinataire)
+                // Firestore ne permet pas le "CONTIENT" (partial match) facilement, on fait du "COMMENCE PAR"
+                // Pour contourner, on fait 3 requêtes exactes ou 'startAt'
+                
+                // Astuce : On recherche exact pour Ref, Label, Recipient
+                // Note: Une vraie recherche 'Full Text' demanderait Algolia, ici on fait au mieux avec Firestore.
+                const qText = q; 
+                
+                // On lance les requêtes en parallèle
+                const promises = [
+                    getDocs(query(collection(db, "transactions"), where("reference", "==", qText))),
+                    getDocs(query(collection(db, "transactions"), where("label", "==", qText))),
+                    getDocs(query(collection(db, "transactions"), where("recipient", "==", qText))),
+                    // Recherche 'Commence par' (Case sensitive malheureusement avec Firebase basic)
+                    getDocs(query(collection(db, "transactions"), where("label", ">=", qText), where("label", "<=", qText + '\uf8ff'))),
+                    getDocs(query(collection(db, "transactions"), where("recipient", ">=", qText), where("recipient", "<=", qText + '\uf8ff')))
+                ];
+
+                const snapshots = await Promise.all(promises);
+                
+                snapshots.forEach(snap => {
+                    snap.forEach(doc => results.set(doc.id, { id: doc.id, ...doc.data() }));
+                });
+
+                // Conversion en liste et Tri par date (plus récent en premier)
+                globalSearchResults.value = Array.from(results.values()).sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+
+            } catch (e) {
+                console.error("Erreur recherche", e);
+            }
+        };
+
+        // On surveille la barre de recherche pour déclencher ou annuler
+        watch(historySearchQuery, (newVal) => {
+            if (!newVal) isSearchingGlobal.value = false;
+        });
 
         // 2. Sélectionner un client dans le modal de modification
         const selectClientForEdit = (c) => {
@@ -561,26 +646,46 @@ createApp({
         const selectClient = (c) => { form.value.reference = c.REFERENCE; form.value.label = c.EXPEDITEUR; form.value.recipient = c.DESTINATEUR || ''; form.value.expectedPrice = c.PRIX; showSuggestions.value = false; searchQuery.value = ''; };
 
         const importClients = () => {
-            const file = fileInput.value.files[0]; if (!file) return; importStatus.value = "Lecture...";
-            Papa.parse(file, { header: true, skipEmptyLines: true, complete: async (results) => {
-                    importStatus.value = `Import de ${results.data.length} clients...`; let count = 0; const batchSize = 400; let batch = writeBatch(db);
+            const file = fileInput.value.files[0]; 
+            if (!file) return; 
+            importStatus.value = "Lecture...";
+            
+            Papa.parse(file, { 
+                header: true, 
+                skipEmptyLines: true, 
+                complete: async (results) => {
+                    importStatus.value = `Import de ${results.data.length} clients...`; 
+                    let count = 0; 
+                    const batchSize = 400; 
+                    let batch = writeBatch(db);
+                    
                     for (const row of results.data) {
                         if (!row.REFERENCE) continue;
                         const refClean = row.REFERENCE.replace(/\//g, "-").trim();
                         
-                        // ICI : On s'assure de bien prendre toutes les colonnes du CSV
+                        // --- CONVERSION EURO -> CFA ---
+                        // 1. On nettoie le texte (enlève espaces, €, et remplace virgule par point)
+                        let rawPrice = row.PRIX ? row.PRIX.toString().replace(/\s/g, '').replace('€', '').replace(',', '.') : '0';
+                        // 2. On convertit en nombre
+                        let priceInEuro = parseFloat(rawPrice);
+                        // 3. On multiplie par 656 et on arrondit à l'entier le plus proche
+                        let priceInCFA = Math.round(priceInEuro * 656);
+
                         batch.set(doc(db, "clients", refClean), { 
                             REFERENCE: row.REFERENCE, 
                             EXPEDITEUR: row.EXPEDITEUR || '', 
-                            DESTINATEUR: row.DESTINATEUR || '', // Ajouté
-                            TELEPHONE: row.TELEPHONE || '',     // Ajouté
-                            TELEPHONE2: row.TELEPHONE2 || '',   // Ajouté
-                            PRIX: row.PRIX ? parseFloat(row.PRIX.replace(/\s/g, '').replace(',', '.')) : 0 
+                            DESTINATEUR: row.DESTINATEUR || '', 
+                            TELEPHONE: row.TELEPHONE || '',     
+                            TELEPHONE2: row.TELEPHONE2 || '',   
+                            PRIX: isNaN(priceInCFA) ? 0 : priceInCFA // Sécurité si le CSV est vide
                         }, { merge: true });
                         
-                        count++; if (count % batchSize === 0) { await batch.commit(); batch = writeBatch(db); }
+                        count++; 
+                        if (count % batchSize === 0) { await batch.commit(); batch = writeBatch(db); }
                     }
-                    await batch.commit(); importStatus.value = "Terminé !"; setTimeout(() => importStatus.value = '', 3000);
+                    await batch.commit(); 
+                    importStatus.value = "Terminé !"; 
+                    setTimeout(() => importStatus.value = '', 3000);
                 }
             });
         };
@@ -612,7 +717,7 @@ createApp({
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
-            saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals,
+            saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, globalSearchResults, isSearchingGlobal,
             
             // EXPORTS SALAIRE
             currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, 
