@@ -49,6 +49,9 @@ createApp({
         const showHistoryModal = ref(false);
         const selectedSessionHistory = ref(null);
         const selectedTransactionsHistory = ref([]);
+        const showEditTransactionModal = ref(false); // NOUVEAU
+        const editingTx = ref({}); // NOUVEAU (Données en cours de modif)
+        const originalTxState = ref({}); // NOUVEAU (Pour se souvenir de l'état avant modif)
         
         // --- DONNEES DATABASE CLIENT ---
         const clientDatabase = ref([]);
@@ -296,11 +299,16 @@ createApp({
         
         const filteredClients = computed(() => {
             if (!searchQuery.value || searchQuery.value.length < 2) return [];
+            
+            // On met la recherche en minuscule pour ignorer les majuscules
             const q = searchQuery.value.toLowerCase();
+            
             return clientDatabase.value.filter(c => 
                 (c.REFERENCE?.toLowerCase().includes(q)) || 
                 (c.EXPEDITEUR?.toLowerCase().includes(q)) || 
-                (c.DESTINATEUR?.toLowerCase().includes(q)) // <--- AJOUTÉ ICI
+                (c.DESTINATEUR?.toLowerCase().includes(q)) || 
+                (c.TELEPHONE?.toString().includes(q)) ||  // Recherche Tel 1
+                (c.TELEPHONE2?.toString().includes(q))    // Recherche Tel 2
             ).slice(0, 10);
         });
 
@@ -320,6 +328,116 @@ createApp({
                 loadEmployees(); loadSalaryHistory(); loadSalaryFunds();
             }
         });
+        // --- LOGIQUE MODIFICATION TRANSACTION (NOUVEAU) ---
+
+        // 1. Ouvrir le modal et préparer les données
+        const openEditTransaction = (tx) => {
+            // On sauvegarde l'état original pour pouvoir annuler l'impact sur l'ancien client
+            originalTxState.value = { ...tx }; 
+            
+            // On prépare l'objet d'édition (copie)
+            editingTx.value = { 
+                ...tx, 
+                // On convertit le timestamp en format date pour l'input HTML (YYYY-MM-DD)
+                date: tx.timestamp.toDate().toISOString().split('T')[0] 
+            };
+            
+            // On pré-remplit la barre de recherche avec le nom actuel
+            searchQuery.value = tx.label || tx.reference || ''; 
+            showSuggestions.value = false; // On cache la liste au début
+            showEditTransactionModal.value = true;
+        };
+
+        // 2. Sélectionner un client dans le modal de modification
+        const selectClientForEdit = (c) => {
+            editingTx.value.reference = c.REFERENCE;
+            editingTx.value.label = c.EXPEDITEUR;
+            editingTx.value.recipient = c.DESTINATEUR || '';
+            editingTx.value.expectedPrice = c.PRIX;
+            searchQuery.value = c.EXPEDITEUR; // Affiche le nom choisi
+            showSuggestions.value = false;
+        };
+
+        // 3. Sauvegarder les modifications
+        const saveEditedTransaction = async () => {
+            try {
+                // ETAPE A : Annuler l'impact de l'ANCIENNE transaction (comme une suppression)
+                // Si l'ancienne transaction avait une référence, on rembourse la dette de ce client "X"
+                if (originalTxState.value.reference) {
+                    const oldRefClean = originalTxState.value.reference.replace(/\//g, "-").trim();
+                    const oldClientRef = doc(db, "clients", oldRefClean);
+                    const oldClientSnap = await getDoc(oldClientRef);
+                    
+                    if (oldClientSnap.exists()) {
+                        const oldDebt = oldClientSnap.data().PRIX || 0;
+                        // On lui remet le montant net qu'on avait déduit
+                        const amountToRestore = originalTxState.value.amount - (originalTxState.value.fees || 0);
+                        await updateDoc(oldClientRef, { PRIX: oldDebt + amountToRestore });
+                    }
+                }
+
+                // ETAPE B : Recalculer les frais avec les NOUVELLES données
+                let newFees = 0;
+                const amount = editingTx.value.amount;
+                if (!editingTx.value.isBill) {
+                    if (editingTx.value.category === 'OM' && editingTx.value.type === 'CREDIT') {
+                        const net = amount / 1.01; newFees = Math.round(amount - net);
+                    } else if (editingTx.value.category === 'WAVE' && editingTx.value.type === 'DEBIT') {
+                        let calc = Math.round(amount * 0.01); if (calc > 5000) calc = 5000; newFees = calc;
+                    }
+                }
+                const newNetAmount = amount - newFees;
+
+                // ETAPE C : Mise à jour de la transaction dans la base
+                const selectedDate = new Date(editingTx.value.date);
+                const now = new Date(); selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+
+                await updateDoc(doc(db, "transactions", editingTx.value.id), {
+                    reference: editingTx.value.reference,
+                    label: editingTx.value.label,
+                    recipient: editingTx.value.recipient,
+                    amount: editingTx.value.amount,
+                    category: editingTx.value.category,
+                    fees: newFees,
+                    timestamp: Timestamp.fromDate(selectedDate)
+                });
+
+                // ETAPE D : Appliquer l'impact sur le NOUVEAU client (ou le même mis à jour)
+                // (Même logique que addTransaction)
+                let contactKey = editingTx.value.reference;
+                if (!contactKey && editingTx.value.recipient) {
+                    contactKey = editingTx.value.recipient.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                }
+
+                if (contactKey) {
+                    const newRefClean = contactKey.replace(/\//g, "-").trim();
+                    const newClientRef = doc(db, "clients", newRefClean);
+                    const newClientSnap = await getDoc(newClientRef); // On récupère la version fraîche
+
+                    if (newClientSnap.exists()) {
+                        // Client existe : on déduit le nouveau montant
+                        const currentDebt = newClientSnap.data().PRIX || 0;
+                        await updateDoc(newClientRef, { PRIX: currentDebt - newNetAmount });
+                    } else {
+                        // Nouveau client : on crée
+                        const initialDebt = editingTx.value.reference ? editingTx.value.amount : 0;
+                        await setDoc(newClientRef, { 
+                            REFERENCE: editingTx.value.reference || contactKey, 
+                            EXPEDITEUR: editingTx.value.label, 
+                            DESTINATEUR: editingTx.value.recipient || '', 
+                            TELEPHONE: '', 
+                            PRIX: initialDebt 
+                        }, { merge: true });
+
+                        if (!editingTx.value.reference) await updateDoc(newClientRef, { PRIX: 0 - newNetAmount });
+                    }
+                }
+
+                showEditTransactionModal.value = false;
+                alert("Transaction modifiée avec succès !");
+
+            } catch(e) { console.error(e); alert("Erreur lors de la modification : " + e.message); }
+        };
 
         // METHODS
         const login = async () => { try { await signInWithEmailAndPassword(auth, loginForm.value.email, loginForm.value.password); } catch (e) { loginError.value = "Erreur de connexion"; } };
@@ -449,7 +567,17 @@ createApp({
                     for (const row of results.data) {
                         if (!row.REFERENCE) continue;
                         const refClean = row.REFERENCE.replace(/\//g, "-").trim();
-                        batch.set(doc(db, "clients", refClean), { REFERENCE: row.REFERENCE, EXPEDITEUR: row.EXPEDITEUR || '', DESTINATEUR: row.DESTINATEUR || '', TELEPHONE: row.TELEPHONE || '', TELEPHONE2: row.TELEPHONE2 || '', PRIX: row.PRIX ? parseFloat(row.PRIX.replace(/\s/g, '').replace(',', '.')) : 0 }, { merge: true });
+                        
+                        // ICI : On s'assure de bien prendre toutes les colonnes du CSV
+                        batch.set(doc(db, "clients", refClean), { 
+                            REFERENCE: row.REFERENCE, 
+                            EXPEDITEUR: row.EXPEDITEUR || '', 
+                            DESTINATEUR: row.DESTINATEUR || '', // Ajouté
+                            TELEPHONE: row.TELEPHONE || '',     // Ajouté
+                            TELEPHONE2: row.TELEPHONE2 || '',   // Ajouté
+                            PRIX: row.PRIX ? parseFloat(row.PRIX.replace(/\s/g, '').replace(',', '.')) : 0 
+                        }, { merge: true });
+                        
                         count++; if (count % batchSize === 0) { await batch.commit(); batch = writeBatch(db); }
                     }
                     await batch.commit(); importStatus.value = "Terminé !"; setTimeout(() => importStatus.value = '', 3000);
@@ -494,7 +622,7 @@ createApp({
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory,
             openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, 
-            saveSalaryFund, deleteSalaryFund, salaryStats
+            saveSalaryFund, deleteSalaryFund, salaryStats, showEditTransactionModal, editingTx, openEditTransaction, saveEditedTransaction, selectClientForEdit
         };
     }
 }).mount('#app');

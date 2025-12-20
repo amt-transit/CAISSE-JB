@@ -8,20 +8,21 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
     <style>
         body { background-color: #f3f4f6; font-family: sans-serif; }
         .table-compact th, .table-compact td { padding: 4px 8px; border: 1px solid #e5e7eb; white-space: nowrap; }
         .table-compact th { background-color: #f3f4f6; font-size: 11px; text-transform: uppercase; color: #6b7280; }
         .table-compact td { font-size: 12px; }
         [v-cloak] { display: none; }
-        /* Style spécifique Tontine */
+        
+        /* Tontine Cards */
         .tontine-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border-top: 4px solid #cbd5e1; }
         .tontine-card.winner { border-top-color: #10b981; background-color: #ecfdf5; }
     </style>
-
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body class="text-gray-800 text-sm">
 
@@ -59,6 +60,7 @@
         <main class="flex-grow p-2 md:p-4 max-w-full w-full mx-auto">
 
             <div v-if="currentView === 'dashboard'">
+                
                 <div v-if="!currentSession && !loading" class="flex flex-col items-center justify-center py-10">
                     <div class="bg-white p-8 rounded-xl shadow-2xl max-w-lg w-full border-t-4 border-indigo-600 text-center">
                         <h2 class="text-2xl font-bold mb-2 text-gray-800">Caisse Fermée</h2>
@@ -92,20 +94,25 @@
                                 <h3 class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> Nouvelle Opération</h3>
                                 <form @submit.prevent="addTransaction" class="space-y-2">
                                     <div><label class="text-[10px] font-bold text-gray-500">Date</label><input type="date" v-model="form.date" class="w-full p-1 border rounded text-xs"></div>
-                                    <div class="relative"><input type="text" v-model="searchQuery" placeholder="Recherche Client..." class="w-full p-1 border-2 border-indigo-100 rounded text-xs bg-indigo-50" @input="showSuggestions = true"><div v-if="showSuggestions && filteredClients.length > 0" class="absolute z-50 w-full bg-white border shadow-xl rounded max-h-60 overflow-y-auto mt-1 left-0"><div v-for="client in filteredClients" :key="client.id" @click="selectClient(client)" class="p-2 hover:bg-indigo-50 cursor-pointer border-b text-xs"><div class="flex justify-between font-bold text-indigo-700"><span>{{ client.REFERENCE }}</span><span>{{ client.PRIX }} F</span></div><div class="text-gray-600 truncate">{{ client.EXPEDITEUR }}</div></div></div></div>
-                                    
+                                    <div class="relative">
+                                        <input type="text" v-model="searchQuery" placeholder="Recherche Client..." class="w-full p-1 border-2 border-indigo-100 rounded text-xs bg-indigo-50" @input="showSuggestions = true">
+                                        <div v-if="showSuggestions && filteredClients.length > 0" class="absolute z-50 w-full bg-white border shadow-xl rounded max-h-60 overflow-y-auto mt-1 left-0">
+                                            <div v-for="client in filteredClients" :key="client.id" @click="selectClient(client)" class="p-2 hover:bg-indigo-50 cursor-pointer border-b text-xs">
+                                                <div class="flex justify-between font-bold text-indigo-700"><span>{{ client.REFERENCE }}</span><span>{{ client.PRIX }} F</span></div>
+                                                <div class="text-gray-800 font-bold truncate"><span v-if="client.EXPEDITEUR">{{ client.EXPEDITEUR }}</span><span v-if="client.DESTINATEUR"> <i class="fa-solid fa-arrow-right text-gray-400 mx-1"></i> {{ client.DESTINATEUR }}</span></div>
+                                                <div class="text-gray-500 text-[10px]"><span v-if="client.TELEPHONE"><i class="fa-solid fa-phone mr-1"></i>{{ client.TELEPHONE }}</span><span v-if="client.TELEPHONE2"> / {{ client.TELEPHONE2 }}</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div class="flex gap-1"><button type="button" @click="form.type = 'CREDIT'" :class="form.type === 'CREDIT' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'" class="flex-1 py-1 rounded text-xs font-bold">ENTRÉE</button><button type="button" @click="form.type = 'DEBIT'" :class="form.type === 'DEBIT' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-500'" class="flex-1 py-1 rounded text-xs font-bold">SORTIE</button></div>
-                                    
                                     <div class="flex gap-2"><div class="w-1/2"><label class="text-[10px] text-gray-500">Compte</label><select v-model="form.category" class="w-full p-1 border rounded text-xs"><option value="ESPECE">Espèces</option><option value="OM">Orange Money</option><option value="WAVE">Wave</option><option value="BANQUE">Banque</option></select></div><div class="w-1/2"><label class="text-[10px] text-gray-500">Rèf</label><input type="text" v-model="form.reference" class="w-full p-1 border rounded text-xs"></div></div>
                                     <div><label class="text-[10px] text-gray-500">Expéditeur</label><input type="text" v-model="form.label" class="w-full p-1 border rounded text-xs font-bold" required></div>
                                     <div><label class="text-[10px] text-gray-500">Destinataire</label><input type="text" v-model="form.recipient" class="w-full p-1 border rounded text-xs"></div>
                                     <div><label class="text-[10px] text-gray-500">Montant</label><input type="number" v-model.number="form.amount" class="w-full p-1 border rounded text-sm font-mono font-bold" required></div>
-                                    
                                     <div class="flex justify-between items-center bg-gray-50 p-1 rounded border">
                                         <div class="flex items-center gap-2 cursor-pointer" @click="form.isHidden = !form.isHidden"><div class="w-4 h-4 border rounded flex items-center justify-center" :class="form.isHidden ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'"><i v-if="form.isHidden" class="fa-solid fa-check text-white text-[8px]"></i></div><span class="text-[10px] text-gray-600">Cacher</span></div>
                                         <div class="flex items-center gap-2 cursor-pointer" @click="form.isBill = !form.isBill"><div class="w-4 h-4 border rounded flex items-center justify-center" :class="form.isBill ? 'bg-orange-500 border-orange-500' : 'border-gray-300'"><i v-if="form.isBill" class="fa-solid fa-check text-white text-[8px]"></i></div><span class="text-[10px] text-orange-600 font-bold">Facture (0%)</span></div>
                                     </div>
-
                                     <button type="submit" class="w-full mt-2 bg-indigo-700 text-white font-bold py-2 rounded shadow text-xs">AJOUTER</button>
                                 </form>
                             </div>
@@ -128,7 +135,10 @@
                                             <td class="text-center"><span class="px-1 py-0.5 rounded text-[9px] font-bold border" :class="getBadgeClass(tx.category)">{{ getModeAbbr(tx.category) }}</span></td>
                                             <td class="text-right font-mono font-bold" :class="tx.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'">{{ formatMoney(tx.amount - (tx.fees || 0)) }}</td>
                                             <td class="text-right font-mono text-[10px]"><div v-if="tx.expectedPrice && tx.expectedPrice > 0"><span v-if="(tx.amount - tx.expectedPrice) < 0" class="text-red-600 font-bold">{{ formatMoney(tx.amount - tx.expectedPrice) }}</span><span v-else-if="(tx.amount - tx.expectedPrice) > 0" class="text-green-600">+{{ formatMoney(tx.amount - tx.expectedPrice) }}</span><span v-else class="text-green-400"><i class="fa-solid fa-check"></i></span></div></td>
-                                            <td v-if="isAdmin" class="text-right p-0"><button @click="deleteTransaction(tx)" class="text-gray-300 hover:text-red-500 px-2 py-1 opacity-0 group-hover:opacity-100 transition"><i class="fa-solid fa-times"></i></button></td>
+                                            <td v-if="isAdmin" class="text-right p-0">
+                                                <button @click="openEditTransaction(tx)" class="text-gray-300 hover:text-orange-500 px-1 py-1 transition" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+                                                <button @click="deleteTransaction(tx)" class="text-gray-300 hover:text-red-500 px-1 py-1 transition" title="Supprimer"><i class="fa-solid fa-times"></i></button>
+                                            </td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -165,6 +175,7 @@
             </div>
 
             <div v-if="currentView === 'salaire'" class="flex flex-col h-[calc(100vh-80px)]">
+                
                 <div class="flex gap-2 mb-4 bg-white p-2 rounded shadow overflow-x-auto">
                     <button @click="currentSalaireView = 'employes'" :class="currentSalaireView === 'employes' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'" class="px-3 py-1 rounded text-xs font-bold transition whitespace-nowrap"><i class="fa-solid fa-users mr-1"></i>Employés</button>
                     <button @click="currentSalaireView = 'paie'" :class="currentSalaireView === 'paie' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'" class="px-3 py-1 rounded text-xs font-bold transition whitespace-nowrap"><i class="fa-solid fa-money-bill-wave mr-1"></i>Saisie Paie</button>
@@ -200,32 +211,17 @@
 
                 <div v-if="currentSalaireView === 'paie'" class="bg-white rounded shadow p-4 flex-grow overflow-hidden flex flex-col">
                     <div class="flex justify-between items-center mb-4">
-                        <div class="flex items-center gap-2">
-                            <h2 class="font-bold text-gray-700">Saisie des Paies</h2>
-                            <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-bold">{{ unpaidEmployees.length }} à payer</span>
-                        </div>
-                        <select v-model="paiePeriod" class="border rounded p-1 text-xs font-bold text-indigo-700 border-indigo-200 bg-indigo-50">
-                            <option value="15">Acompte (15 du mois)</option>
-                            <option value="30">Solde (Fin du mois)</option>
-                        </select>
+                        <div class="flex items-center gap-2"><h2 class="font-bold text-gray-700">Saisie des Paies</h2><span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-bold">{{ unpaidEmployees.length }} à payer</span></div>
+                        <select v-model="paiePeriod" class="border rounded p-1 text-xs font-bold text-indigo-700 border-indigo-200 bg-indigo-50"><option value="15">Acompte (15 du mois)</option><option value="30">Solde (Fin du mois)</option></select>
                     </div>
-                    
                     <div v-if="unpaidEmployees.length === 0" class="flex-grow flex items-center justify-center text-gray-400 flex-col"><i class="fa-solid fa-check-circle text-4xl mb-2 text-green-200"></i><p>Tout le monde a été payé pour cette période !</p></div>
-                    
                     <div v-else class="overflow-auto flex-grow">
                         <table class="w-full text-left table-compact border-collapse">
                             <thead class="bg-gray-50 sticky top-0"><tr><th>Employé</th><th class="text-right">Base / Avance</th><th class="text-right">Retenue Prêt</th><th class="text-right">Retenue Tontine</th><th class="text-right bg-indigo-50">Net à Payer</th><th class="text-center">Action</th></tr></thead>
                             <tbody>
                                 <tr v-for="emp in unpaidEmployees" :key="emp.id" class="hover:bg-gray-50">
-                                    <td class="font-bold">{{ emp.name }}</td>
-                                    <td class="text-right text-gray-600">{{ formatMoney(calculateBase(emp)) }}</td>
-                                    <td class="text-right text-red-500">{{ formatMoney(calculateLoanDeduc(emp)) }}</td>
-                                    <td class="text-right text-orange-500">{{ formatMoney(calculateTontineDeduc(emp)) }}</td>
-                                    <td class="text-right font-bold text-indigo-700 bg-indigo-50 font-mono">{{ formatMoney(calculateNet(emp)) }}</td>
-                                    <td class="text-center">
-                                        <button v-if="isAdmin" @click="openPayModal(emp)" class="bg-indigo-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-indigo-700 shadow">PAYER</button>
-                                        <span v-else class="text-[9px] text-gray-400 italic">Lecture seule</span>
-                                    </td>
+                                    <td class="font-bold">{{ emp.name }}</td><td class="text-right text-gray-600">{{ formatMoney(calculateBase(emp)) }}</td><td class="text-right text-red-500">{{ formatMoney(calculateLoanDeduc(emp)) }}</td><td class="text-right text-orange-500">{{ formatMoney(calculateTontineDeduc(emp)) }}</td><td class="text-right font-bold text-indigo-700 bg-indigo-50 font-mono">{{ formatMoney(calculateNet(emp)) }}</td>
+                                    <td class="text-center"><button v-if="isAdmin" @click="openPayModal(emp)" class="bg-indigo-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-indigo-700 shadow">PAYER</button><span v-else class="text-[9px] text-gray-400 italic">Lecture seule</span></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -234,128 +230,33 @@
 
                 <div v-if="currentSalaireView === 'fonds'" class="flex flex-col flex-grow gap-4">
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        <div class="bg-white p-3 rounded shadow border-l-4 border-green-500">
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">Total Reçu</p>
-                            <p class="text-xl font-bold text-green-600 font-mono">{{ formatMoney(salaryStats.totalReceived) }}</p>
-                        </div>
-                        <div class="bg-white p-3 rounded shadow border-l-4 border-red-500">
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">Total Payé</p>
-                            <p class="text-xl font-bold text-red-600 font-mono">{{ formatMoney(salaryStats.totalPaid) }}</p>
-                        </div>
-                        <div class="bg-white p-3 rounded shadow border-l-4 border-yellow-500">
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">Total Prêt (Encours)</p>
-                            <p class="text-xl font-bold text-yellow-600 font-mono">{{ formatMoney(salaryStats.totalLoans) }}</p>
-                        </div>
-                        <div class="bg-white p-3 rounded shadow border-l-4 border-indigo-500">
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">Reste Budget</p>
-                            <p class="text-xl font-bold text-indigo-700 font-mono">{{ formatMoney(salaryStats.balance) }}</p>
-                        </div>
+                        <div class="bg-white p-3 rounded shadow border-l-4 border-green-500"><p class="text-[10px] text-gray-500 font-bold uppercase">Total Reçu</p><p class="text-xl font-bold text-green-600 font-mono">{{ formatMoney(salaryStats.totalReceived) }}</p></div>
+                        <div class="bg-white p-3 rounded shadow border-l-4 border-red-500"><p class="text-[10px] text-gray-500 font-bold uppercase">Total Payé</p><p class="text-xl font-bold text-red-600 font-mono">{{ formatMoney(salaryStats.totalPaid) }}</p></div>
+                        <div class="bg-white p-3 rounded shadow border-l-4 border-yellow-500"><p class="text-[10px] text-gray-500 font-bold uppercase">Total Prêt (Encours)</p><p class="text-xl font-bold text-yellow-600 font-mono">{{ formatMoney(salaryStats.totalLoans) }}</p></div>
+                        <div class="bg-white p-3 rounded shadow border-l-4 border-indigo-500"><p class="text-[10px] text-gray-500 font-bold uppercase">Reste Budget</p><p class="text-xl font-bold text-indigo-700 font-mono">{{ formatMoney(salaryStats.balance) }}</p></div>
                     </div>
-
                     <div class="bg-white rounded shadow p-4 flex-grow overflow-hidden flex flex-col">
-                        <div class="flex justify-between items-center mb-4">
-                            <h2 class="font-bold text-gray-700">Historique des Dotations</h2>
-                            <button v-if="isAdmin" @click="showFundModal = true" class="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold shadow hover:bg-green-700"><i class="fa-solid fa-plus mr-1"></i>Recevoir Fonds</button>
-                        </div>
-                        <div class="overflow-auto flex-grow">
-                            <table class="w-full text-left table-compact border-collapse">
-                                <thead class="bg-gray-50 sticky top-0"><tr><th>Date</th><th>Note / Motif</th><th class="text-right">Montant</th><th class="text-right">Action</th></tr></thead>
-                                <tbody>
-                                    <tr v-for="fund in salaryFunds" :key="fund.id" class="hover:bg-gray-50">
-                                        <td class="text-gray-500">{{ formatDate(fund.timestamp) }}</td>
-                                        <td class="font-bold text-gray-700">{{ fund.note }}</td>
-                                        <td class="text-right font-mono font-bold text-green-600">+ {{ formatMoney(fund.amount) }}</td>
-                                        <td class="text-right"><button v-if="isAdmin" @click="deleteSalaryFund(fund.id)" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-trash"></i></button></td>
-                                    </tr>
-                                    <tr v-if="salaryFunds.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun fonds reçu pour le moment.</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
+                        <div class="flex justify-between items-center mb-4"><h2 class="font-bold text-gray-700">Historique des Dotations</h2><button v-if="isAdmin" @click="showFundModal = true" class="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold shadow hover:bg-green-700"><i class="fa-solid fa-plus mr-1"></i>Recevoir Fonds</button></div>
+                        <div class="overflow-auto flex-grow"><table class="w-full text-left table-compact border-collapse"><thead class="bg-gray-50 sticky top-0"><tr><th>Date</th><th>Note / Motif</th><th class="text-right">Montant</th><th class="text-right">Action</th></tr></thead><tbody><tr v-for="fund in salaryFunds" :key="fund.id" class="hover:bg-gray-50"><td class="text-gray-500">{{ formatDate(fund.timestamp) }}</td><td class="font-bold text-gray-700">{{ fund.note }}</td><td class="text-right font-mono font-bold text-green-600">+ {{ formatMoney(fund.amount) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryFund(fund.id)" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-trash"></i></button></td></tr><tr v-if="salaryFunds.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun fonds reçu pour le moment.</td></tr></tbody></table></div>
                     </div>
                 </div>
 
                 <div v-if="currentSalaireView === 'historique'" class="bg-white rounded shadow p-4 flex-grow overflow-hidden flex flex-col">
-                    
                     <div class="flex justify-between items-center mb-4">
-                        <div class="flex items-center gap-2">
-                            <button v-if="selectedHistoryMonth" @click="closeMonthDetails" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded text-xs font-bold transition">
-                                <i class="fa-solid fa-arrow-left mr-1"></i> Retour
-                            </button>
-                            
-                            <h2 class="font-bold text-gray-700">
-                                <span v-if="!selectedHistoryMonth">Historique Mensuel</span>
-                                <span v-else>Détails : {{ selectedHistoryMonth.month }}</span>
-                            </h2>
-                        </div>
+                        <div class="flex items-center gap-2"><button v-if="selectedHistoryMonth" @click="closeMonthDetails" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded text-xs font-bold transition"><i class="fa-solid fa-arrow-left mr-1"></i> Retour</button><h2 class="font-bold text-gray-700"><span v-if="!selectedHistoryMonth">Historique Mensuel</span><span v-else>Détails : {{ selectedHistoryMonth.month }}</span></h2></div>
                         <button @click="exportSalaryHistoryPDF" class="bg-red-600 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-file-pdf mr-1"></i>PDF Global</button>
                     </div>
-
                     <div v-if="!selectedHistoryMonth" class="overflow-auto flex-grow">
                         <table class="w-full text-left table-compact border-collapse">
-                            <thead class="bg-gray-50 sticky top-0">
-                                <tr>
-                                    <th>Mois</th>
-                                    <th class="text-right">Total Payé (Net)</th>
-                                    <th class="text-right">Total Prêts Remboursés</th>
-                                    <th class="text-center">Détails</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="group in groupedSalaryHistory" :key="group.month" class="hover:bg-gray-50 cursor-pointer" @click="openMonthDetails(group)">
-                                    <td class="font-bold text-indigo-700 text-lg">{{ group.month }}</td>
-                                    <td class="text-right font-mono font-bold text-lg text-gray-700">{{ formatMoney(group.totalNet) }}</td>
-                                    <td class="text-right font-mono font-bold text-green-600">{{ formatMoney(group.totalLoan) }}</td>
-                                    <td class="text-center">
-                                        <button class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold hover:bg-indigo-200">
-                                            Voir ({{ group.payments.length }}) <i class="fa-solid fa-chevron-right ml-1"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                                <tr v-if="groupedSalaryHistory.length === 0">
-                                    <td colspan="4" class="text-center py-8 text-gray-400">Aucun historique disponible.</td>
-                                </tr>
-                            </tbody>
+                            <thead class="bg-gray-50 sticky top-0"><tr><th>Mois</th><th class="text-right">Total Payé (Net)</th><th class="text-right">Total Prêts Remboursés</th><th class="text-center">Détails</th></tr></thead>
+                            <tbody><tr v-for="group in groupedSalaryHistory" :key="group.month" class="hover:bg-gray-50 cursor-pointer" @click="openMonthDetails(group)"><td class="font-bold text-indigo-700 text-lg">{{ group.month }}</td><td class="text-right font-mono font-bold text-lg text-gray-700">{{ formatMoney(group.totalNet) }}</td><td class="text-right font-mono font-bold text-green-600">{{ formatMoney(group.totalLoan) }}</td><td class="text-center"><button class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold hover:bg-indigo-200">Voir ({{ group.payments.length }}) <i class="fa-solid fa-chevron-right ml-1"></i></button></td></tr><tr v-if="groupedSalaryHistory.length === 0"><td colspan="4" class="text-center py-8 text-gray-400">Aucun historique disponible.</td></tr></tbody>
                         </table>
                     </div>
-
                     <div v-else class="overflow-auto flex-grow bg-gray-50 rounded border p-2">
                         <table class="w-full text-left table-compact border-collapse bg-white shadow-sm">
-                            <thead class="bg-indigo-50 sticky top-0 text-indigo-900">
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Employé</th>
-                                    <th>Type</th>
-                                    <th class="text-right">Remboursement Prêt</th>
-                                    <th class="text-right">Net Payé</th>
-                                    <th class="text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="pay in selectedHistoryMonth.payments" :key="pay.id" class="hover:bg-indigo-50 transition">
-                                    <td class="text-gray-500 text-xs">{{ formatDate(pay.timestamp) }}</td>
-                                    <td class="font-bold">{{ pay.employeeName }}</td>
-                                    <td>{{ pay.type }}</td>
-                                    <td class="text-right font-mono text-green-600 font-bold">
-                                        {{ pay.loan > 0 ? formatMoney(pay.loan) : '-' }}
-                                    </td>
-                                    <td class="text-right font-mono font-bold text-gray-800 bg-gray-50">
-                                        {{ formatMoney(pay.net) }}
-                                    </td>
-                                    <td class="text-right">
-                                        <button v-if="isAdmin" @click="deleteSalaryPayment(pay)" class="text-red-400 hover:text-red-600" title="Annuler ce paiement">
-                                            <i class="fa-solid fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                            <tfoot class="bg-gray-100 font-bold border-t-2 border-gray-200">
-                                <tr>
-                                    <td colspan="3" class="text-right p-2">TOTAUX MOIS :</td>
-                                    <td class="text-right text-green-700">{{ formatMoney(selectedHistoryMonth.totalLoan) }}</td>
-                                    <td class="text-right text-indigo-700">{{ formatMoney(selectedHistoryMonth.totalNet) }}</td>
-                                    <td></td>
-                                </tr>
-                            </tfoot>
+                            <thead class="bg-indigo-50 sticky top-0 text-indigo-900"><tr><th>Date</th><th>Employé</th><th>Type</th><th class="text-right">Remboursement Prêt</th><th class="text-right">Net Payé</th><th class="text-right">Actions</th></tr></thead>
+                            <tbody><tr v-for="pay in selectedHistoryMonth.payments" :key="pay.id" class="hover:bg-indigo-50 transition"><td class="text-gray-500 text-xs">{{ formatDate(pay.timestamp) }}</td><td class="font-bold">{{ pay.employeeName }}</td><td>{{ pay.type }}</td><td class="text-right font-mono text-green-600 font-bold">{{ pay.loan > 0 ? formatMoney(pay.loan) : '-' }}</td><td class="text-right font-mono font-bold text-gray-800 bg-gray-50">{{ formatMoney(pay.net) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryPayment(pay)" class="text-red-400 hover:text-red-600" title="Annuler ce paiement"><i class="fa-solid fa-trash"></i></button></td></tr></tbody>
+                            <tfoot class="bg-gray-100 font-bold border-t-2 border-gray-200"><tr><td colspan="3" class="text-right p-2">TOTAUX MOIS :</td><td class="text-right text-green-700">{{ formatMoney(selectedHistoryMonth.totalLoan) }}</td><td class="text-right text-indigo-700">{{ formatMoney(selectedHistoryMonth.totalNet) }}</td><td></td></tr></tfoot>
                         </table>
                     </div>
                 </div>
@@ -364,95 +265,8 @@
                     <h2 class="font-bold text-gray-700 mb-4">Suivi Tontine (Mois en cours)</h2>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div v-for="emp in tontineMembers" :key="emp.id" class="tontine-card" :class="{'winner': hasPaidTontine(emp.id)}">
-                            <div class="text-3xl mb-2" :class="hasPaidTontine(emp.id) ? 'text-green-500' : 'text-gray-300'"><i class="fa-solid fa-user-circle"></i></div>
-                            <h3 class="font-bold text-sm">{{ emp.name }}</h3>
-                            <div class="mt-2 text-[10px] font-bold px-2 py-1 rounded inline-block" :class="hasPaidTontine(emp.id) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'">{{ hasPaidTontine(emp.id) ? 'PAYÉ' : 'NON PAYÉ' }}</div>
+                            <div class="text-3xl mb-2" :class="hasPaidTontine(emp.id) ? 'text-green-500' : 'text-gray-300'"><i class="fa-solid fa-user-circle"></i></div><h3 class="font-bold text-sm">{{ emp.name }}</h3><div class="mt-2 text-[10px] font-bold px-2 py-1 rounded inline-block" :class="hasPaidTontine(emp.id) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'">{{ hasPaidTontine(emp.id) ? 'PAYÉ' : 'NON PAYÉ' }}</div>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="showFundModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-                <div class="bg-white rounded shadow-lg w-80 p-4">
-                    <h3 class="text-lg font-bold mb-4">Recevoir Fonds Salaire</h3>
-                    <form @submit.prevent="saveSalaryFund">
-                        <div class="mb-2"><label class="text-xs">Montant Reçu</label><input type="number" v-model.number="newFund.amount" class="w-full border rounded p-1 font-bold text-lg" required></div>
-                        <div class="mb-4"><label class="text-xs">Note / Motif</label><input type="text" v-model="newFund.note" class="w-full border rounded p-1" placeholder="Ex: Dotation Janvier"></div>
-                        <div class="flex justify-end gap-2"><button type="button" @click="showFundModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold">Enregistrer</button></div>
-                    </form>
-                </div>
-            </div>
-
-            <div v-if="showEditEmployeeModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-                <div class="bg-white rounded shadow-lg w-80 p-4">
-                    <h3 class="text-lg font-bold mb-4">Modifier Employé</h3>
-                    <form @submit.prevent="updateEmployee">
-                        <div class="mb-2"><label class="text-xs">Nom Complet</label><input type="text" v-model="editingEmp.name" class="w-full border rounded p-1" required></div>
-                        <div class="mb-2"><label class="text-xs">Salaire Base</label><input type="number" v-model.number="editingEmp.salary" class="w-full border rounded p-1" required></div>
-                        <div class="mb-2"><label class="text-xs">Dette Actuelle</label><input type="number" v-model.number="editingEmp.loan" class="w-full border rounded p-1"></div>
-                        <div class="mb-4 flex items-center gap-2"><input type="checkbox" v-model="editingEmp.isTontine"><label class="text-xs">Participe Tontine ?</label></div>
-                        <div class="flex justify-end gap-2"><button type="button" @click="showEditEmployeeModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-orange-600 text-white rounded text-xs font-bold">Modifier</button></div>
-                    </form>
-                </div>
-            </div>
-            
-            <div v-if="showPayModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-                <div class="bg-white rounded shadow-lg w-80 p-4">
-                    <h3 class="text-lg font-bold mb-2">Paiement : {{ payForm.name }}</h3>
-                    
-                    <div class="bg-gray-50 p-3 mb-2 rounded text-xs border">
-                        <div class="flex justify-between mb-2">
-                            <span class="text-gray-600">Salaire Base:</span>
-                            <span class="font-bold">{{ formatMoney(payForm.base) }}</span>
-                        </div>
-                        
-                        <div class="flex justify-between items-center mb-2 text-red-600">
-                            <div class="flex flex-col">
-                                <span>- Remb. Prêt:</span>
-                                <span class="text-[9px] text-gray-400">Dette tot: {{ formatMoney(payForm.maxLoan) }}</span>
-                            </div>
-                            <input type="number" 
-                                   v-model.number="payForm.loan" 
-                                   @input="recalcNet"
-                                   class="w-24 text-right border border-red-200 rounded p-1 text-red-600 font-bold bg-white focus:ring-2 focus:ring-red-200 outline-none">
-                        </div>
-
-                        <div class="flex justify-between text-orange-500 mb-2">
-                            <span>- Tontine:</span>
-                            <span>{{ formatMoney(payForm.tontine) }}</span>
-                        </div>
-
-                        <div class="flex justify-between font-bold text-lg border-t border-gray-300 mt-2 pt-2 text-indigo-700">
-                            <span>NET À PAYER:</span>
-                            <span>{{ formatMoney(payForm.net) }}</span>
-                        </div>
-                    </div>
-
-                    <div class="mb-4 text-xs text-gray-500 text-center">
-                        Période : {{ payForm.month }} ({{ paiePeriod == '15' ? 'Acompte' : 'Solde' }})
-                    </div>
-                    
-                    <div class="flex justify-end gap-2">
-                        <button type="button" @click="showPayModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300">Annuler</button>
-                        <button @click="confirmSalaryPayment" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 shadow">VALIDER</button>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="showIndividualHistoryModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-                <div class="bg-white rounded shadow-lg w-full max-w-lg p-4 max-h-[80vh] flex flex-col">
-                    <div class="flex justify-between items-center mb-4 border-b pb-2">
-                        <h3 class="text-lg font-bold">Historique : {{ selectedEmployeeHistoryName }}</h3>
-                        <button @click="showIndividualHistoryModal = false" class="text-gray-500 hover:text-black"><i class="fa-solid fa-times"></i></button>
-                    </div>
-                    <div class="overflow-auto flex-grow">
-                        <table class="w-full text-left table-compact">
-                            <thead class="bg-gray-100 sticky top-0"><tr><th>Date</th><th>Type</th><th>Période</th><th class="text-right">Montant</th></tr></thead>
-                            <tbody>
-                                <tr v-for="pay in individualHistory" :key="pay.id" class="border-b last:border-0"><td class="text-xs text-gray-500">{{ formatDate(pay.timestamp) }}</td><td class="text-xs font-bold">{{ pay.type }}</td><td class="text-xs">{{ pay.month }}</td><td class="text-right text-sm font-mono font-bold text-indigo-600">{{ formatMoney(pay.net) }}</td></tr>
-                                <tr v-if="individualHistory.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun paiement trouvé.</td></tr>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -476,6 +290,41 @@
             </div>
         </div>
 
+        <div v-if="showEditTransactionModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-96 p-4">
+                <h3 class="text-lg font-bold mb-4 text-orange-600">Modifier Transaction</h3>
+                <form @submit.prevent="saveEditedTransaction" class="space-y-3">
+                    <div><label class="text-xs font-bold text-gray-500">Date</label><input type="date" v-model="editingTx.date" class="w-full p-1 border rounded text-xs"></div>
+                    <div class="relative">
+                        <label class="text-xs font-bold text-gray-500">Recherche Client</label>
+                        <input type="text" v-model="searchQuery" placeholder="Nom ou Référence..." class="w-full p-1 border-2 border-orange-200 rounded text-xs bg-orange-50" @input="showSuggestions = true">
+                        <div v-if="showSuggestions && filteredClients.length > 0" class="absolute z-50 w-full bg-white border shadow-xl rounded max-h-40 overflow-y-auto mt-1 left-0">
+                            <div v-for="client in filteredClients" :key="client.id" @click="selectClientForEdit(client)" class="p-2 hover:bg-orange-50 cursor-pointer border-b text-xs">
+                                <div class="flex justify-between font-bold text-indigo-700"><span>{{ client.REFERENCE }}</span><span>{{ client.PRIX }} F</span></div>
+                                <div class="text-gray-800 font-bold truncate"><span v-if="client.EXPEDITEUR">{{ client.EXPEDITEUR }}</span><span v-if="client.DESTINATEUR"> <i class="fa-solid fa-arrow-right text-gray-400 mx-1"></i> {{ client.DESTINATEUR }}</span></div>
+                                <div class="text-gray-500 text-[10px]"><span v-if="client.TELEPHONE"><i class="fa-solid fa-phone mr-1"></i>{{ client.TELEPHONE }}</span><span v-if="client.TELEPHONE2"> / {{ client.TELEPHONE2 }}</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2"><div class="w-1/2"><label class="text-xs text-gray-500">Réf</label><input type="text" v-model="editingTx.reference" class="w-full p-1 border rounded text-xs"></div><div class="w-1/2"><label class="text-xs text-gray-500">Expéditeur</label><input type="text" v-model="editingTx.label" class="w-full p-1 border rounded text-xs"></div></div>
+                    <div><label class="text-xs text-gray-500">Destinataire</label><input type="text" v-model="editingTx.recipient" class="w-full p-1 border rounded text-xs"></div>
+                    <div class="flex gap-2"><div class="w-1/2"><label class="text-xs text-gray-500">Montant</label><input type="number" v-model.number="editingTx.amount" class="w-full p-1 border rounded text-xs font-bold"></div><div class="w-1/2"><label class="text-xs text-gray-500">Compte</label><select v-model="editingTx.category" class="w-full p-1 border rounded text-xs"><option value="ESPECE">Espèces</option><option value="OM">OM</option><option value="WAVE">Wave</option></select></div></div>
+                    <div class="flex justify-end gap-2 mt-4"><button type="button" @click="showEditTransactionModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-orange-600 text-white rounded text-xs font-bold">Mettre à jour</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div v-if="showFundModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-80 p-4">
+                <h3 class="text-lg font-bold mb-4">Recevoir Fonds Salaire</h3>
+                <form @submit.prevent="saveSalaryFund">
+                    <div class="mb-2"><label class="text-xs">Montant Reçu</label><input type="number" v-model.number="newFund.amount" class="w-full border rounded p-1 font-bold text-lg" required></div>
+                    <div class="mb-4"><label class="text-xs">Note / Motif</label><input type="text" v-model="newFund.note" class="w-full border rounded p-1" placeholder="Ex: Dotation Janvier"></div>
+                    <div class="flex justify-end gap-2"><button type="button" @click="showFundModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold">Enregistrer</button></div>
+                </form>
+            </div>
+        </div>
+
         <div v-if="showAddEmployeeModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
             <div class="bg-white rounded shadow-lg w-80 p-4">
                 <h3 class="text-lg font-bold mb-4">Nouvel Employé</h3>
@@ -486,6 +335,45 @@
                     <div class="mb-4 flex items-center gap-2"><input type="checkbox" v-model="newEmp.isTontine"><label class="text-xs">Participe Tontine ?</label></div>
                     <div class="flex justify-end gap-2"><button type="button" @click="showAddEmployeeModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold">Enregistrer</button></div>
                 </form>
+            </div>
+        </div>
+
+        <div v-if="showEditEmployeeModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-80 p-4">
+                <h3 class="text-lg font-bold mb-4">Modifier Employé</h3>
+                <form @submit.prevent="updateEmployee">
+                    <div class="mb-2"><label class="text-xs">Nom Complet</label><input type="text" v-model="editingEmp.name" class="w-full border rounded p-1" required></div>
+                    <div class="mb-2"><label class="text-xs">Salaire Base</label><input type="number" v-model.number="editingEmp.salary" class="w-full border rounded p-1" required></div>
+                    <div class="mb-2"><label class="text-xs">Dette Actuelle</label><input type="number" v-model.number="editingEmp.loan" class="w-full border rounded p-1"></div>
+                    <div class="mb-4 flex items-center gap-2"><input type="checkbox" v-model="editingEmp.isTontine"><label class="text-xs">Participe Tontine ?</label></div>
+                    <div class="flex justify-end gap-2"><button type="button" @click="showEditEmployeeModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-orange-600 text-white rounded text-xs font-bold">Modifier</button></div>
+                </form>
+            </div>
+        </div>
+        
+        <div v-if="showPayModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-80 p-4">
+                <h3 class="text-lg font-bold mb-2">Paiement : {{ payForm.name }}</h3>
+                <div class="bg-gray-50 p-3 mb-2 rounded text-xs border">
+                    <div class="flex justify-between mb-2"><span class="text-gray-600">Salaire Base:</span><span class="font-bold">{{ formatMoney(payForm.base) }}</span></div>
+                    <div class="flex justify-between items-center mb-2 text-red-600"><div class="flex flex-col"><span>- Remb. Prêt:</span><span class="text-[9px] text-gray-400">Dette tot: {{ formatMoney(payForm.maxLoan) }}</span></div><input type="number" v-model.number="payForm.loan" @input="recalcNet" class="w-24 text-right border border-red-200 rounded p-1 text-red-600 font-bold bg-white focus:ring-2 focus:ring-red-200 outline-none"></div>
+                    <div class="flex justify-between text-orange-500 mb-2"><span>- Tontine:</span><span>{{ formatMoney(payForm.tontine) }}</span></div>
+                    <div class="flex justify-between font-bold text-lg border-t border-gray-300 mt-2 pt-2 text-indigo-700"><span>NET À PAYER:</span><span>{{ formatMoney(payForm.net) }}</span></div>
+                </div>
+                <div class="mb-4 text-xs text-gray-500 text-center">Période : {{ payForm.month }} ({{ paiePeriod == '15' ? 'Acompte' : 'Solde' }})</div>
+                <div class="flex justify-end gap-2"><button type="button" @click="showPayModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300">Annuler</button><button @click="confirmSalaryPayment" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 shadow">VALIDER</button></div>
+            </div>
+        </div>
+
+        <div v-if="showIndividualHistoryModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-full max-w-lg p-4 max-h-[80vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4 border-b pb-2"><h3 class="text-lg font-bold">Historique : {{ selectedEmployeeHistoryName }}</h3><button @click="showIndividualHistoryModal = false" class="text-gray-500 hover:text-black"><i class="fa-solid fa-times"></i></button></div>
+                <div class="overflow-auto flex-grow">
+                    <table class="w-full text-left table-compact">
+                        <thead class="bg-gray-100 sticky top-0"><tr><th>Date</th><th>Type</th><th>Période</th><th class="text-right">Montant</th></tr></thead>
+                        <tbody><tr v-for="pay in individualHistory" :key="pay.id" class="border-b last:border-0"><td class="text-xs text-gray-500">{{ formatDate(pay.timestamp) }}</td><td class="text-xs font-bold">{{ pay.type }}</td><td class="text-xs">{{ pay.month }}</td><td class="text-right text-sm font-mono font-bold text-indigo-600">{{ formatMoney(pay.net) }}</td></tr><tr v-if="individualHistory.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun paiement trouvé.</td></tr></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
