@@ -654,21 +654,30 @@ createApp({
                 header: true, 
                 skipEmptyLines: true, 
                 complete: async (results) => {
-                    importStatus.value = `Import de ${results.data.length} clients...`; 
-                    let count = 0; 
+                    importStatus.value = `Analyse de ${results.data.length} lignes...`; 
+                    let countAdded = 0; 
+                    let countSkipped = 0;
                     const batchSize = 400; 
                     let batch = writeBatch(db);
+                    let batchCount = 0; // Compteur pour le batch courant
                     
                     for (const row of results.data) {
                         if (!row.REFERENCE) continue;
                         const refClean = row.REFERENCE.replace(/\//g, "-").trim();
                         
-                        // --- CONVERSION EURO -> CFA ---
-                        // 1. On nettoie le texte (enlève espaces, €, et remplace virgule par point)
+                        // --- 1. VERIFICATION DOUBLON (SECURITE) ---
+                        // On regarde dans la liste locale si cette référence existe déjà
+                        // Puisque la REF est l'identifiant unique, si elle existe, c'est le même dossier.
+                        const exists = clientDatabase.value.some(c => c.id === refClean);
+
+                        if (exists) {
+                            countSkipped++;
+                            continue; // ON PASSE AU SUIVANT (On ne touche pas à l'existant)
+                        }
+
+                        // --- 2. PREPARATION DES DONNEES (Si c'est un nouveau) ---
                         let rawPrice = row.PRIX ? row.PRIX.toString().replace(/\s/g, '').replace('€', '').replace(',', '.') : '0';
-                        // 2. On convertit en nombre
                         let priceInEuro = parseFloat(rawPrice);
-                        // 3. On multiplie par 656 et on arrondit à l'entier le plus proche
                         let priceInCFA = Math.round(priceInEuro * 656);
 
                         batch.set(doc(db, "clients", refClean), { 
@@ -677,15 +686,25 @@ createApp({
                             DESTINATEUR: row.DESTINATEUR || '', 
                             TELEPHONE: row.TELEPHONE || '',     
                             TELEPHONE2: row.TELEPHONE2 || '',   
-                            PRIX: isNaN(priceInCFA) ? 0 : priceInCFA // Sécurité si le CSV est vide
-                        }, { merge: true });
+                            PRIX: isNaN(priceInCFA) ? 0 : priceInCFA 
+                        }); // Pas besoin de merge:true car on est sûr que c'est nouveau
                         
-                        count++; 
-                        if (count % batchSize === 0) { await batch.commit(); batch = writeBatch(db); }
+                        countAdded++;
+                        batchCount++;
+
+                        // Gestion de la limite de 500 opérations par batch Firestore
+                        if (batchCount >= batchSize) { 
+                            await batch.commit(); 
+                            batch = writeBatch(db);
+                            batchCount = 0;
+                        }
                     }
-                    await batch.commit(); 
-                    importStatus.value = "Terminé !"; 
-                    setTimeout(() => importStatus.value = '', 3000);
+                    
+                    // On envoie le reste
+                    if (batchCount > 0) await batch.commit(); 
+                    
+                    importStatus.value = `Fini ! ${countAdded} ajoutés, ${countSkipped} ignorés (déjà existants).`; 
+                    setTimeout(() => importStatus.value = '', 5000);
                 }
             });
         };
