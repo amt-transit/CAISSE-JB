@@ -78,6 +78,15 @@
 
                 <div v-else-if="currentSession">
                     <div class="grid grid-cols-1 lg:grid-cols-4 gap-2 mb-2">
+                        <div class="flex justify-between items-center mb-2 bg-indigo-50 p-2 rounded border border-indigo-100">
+                            <div class="text-xs text-indigo-800">
+                                <span class="font-bold">Session ouverte par :</span> {{ currentSession.openedBy }}
+                                <span class="text-gray-500 ml-2">{{ formatDateTime(currentSession.startTime) }}</span>
+                            </div>
+                            <button v-if="isAdmin" @click="openEditStartAmounts" class="bg-white border border-orange-300 text-orange-600 px-2 py-1 rounded text-xs font-bold hover:bg-orange-50 shadow-sm">
+                                <i class="fa-solid fa-pen-to-square mr-1"></i> Corriger Fonds Initial
+                            </button>
+                        </div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-orange-500 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">OM</p><p class="text-lg font-bold text-orange-600 font-mono leading-none">{{ formatMoney(totals.om) }}</p></div></div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-blue-400 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">Wave</p><p class="text-lg font-bold text-blue-500 font-mono leading-none">{{ formatMoney(totals.wave) }}</p></div></div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-green-500"><div class="flex justify-between text-xs mb-1"><span class="text-gray-500">Théo:</span><span class="font-bold">{{ formatMoney(totals.espece) }}</span></div><div class="flex justify-between text-xs"><span class="text-gray-500">Réel:</span><span class="font-bold text-blue-600">{{ formatMoney(totalEspeceCompte) }}</span></div></div>
@@ -360,6 +369,32 @@
                     <div class="flex gap-2"><div class="w-1/2"><label class="text-xs text-gray-500">Montant</label><input type="number" v-model.number="editingTx.amount" class="w-full p-1 border rounded text-xs font-bold"></div><div class="w-1/2"><label class="text-xs text-gray-500">Compte</label><select v-model="editingTx.category" class="w-full p-1 border rounded text-xs"><option value="ESPECE">Espèces</option><option value="OM">OM</option><option value="WAVE">Wave</option></select></div></div>
                     <div class="flex justify-end gap-2 mt-4"><button type="button" @click="showEditTransactionModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-orange-600 text-white rounded text-xs font-bold">Mettre à jour</button></div>
                 </form>
+            </div>
+        </div>
+        <div v-if="showEditStartAmountModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+            <div class="bg-white rounded shadow-lg w-80 p-4">
+                <h3 class="text-lg font-bold mb-4 text-gray-800">Corriger Fonds Initial</h3>
+                <p class="text-xs text-gray-500 mb-4 bg-yellow-50 p-2 rounded border border-yellow-200">
+                    <i class="fa-solid fa-triangle-exclamation text-yellow-600"></i> Attention, modifier ceci va recalculer tous les soldes théoriques.
+                </p>
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-xs font-bold text-green-700">Espèce Début</label>
+                        <input type="number" v-model.number="tempStartAmounts.espece" class="w-full p-1 border rounded text-right font-bold">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-orange-600">OM Début</label>
+                        <input type="number" v-model.number="tempStartAmounts.om" class="w-full p-1 border rounded text-right font-bold">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-blue-500">Wave Début</label>
+                        <input type="number" v-model.number="tempStartAmounts.wave" class="w-full p-1 border rounded text-right font-bold">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button @click="showEditStartAmountModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300">Annuler</button>
+                    <button @click="saveEditedStartAmounts" class="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold hover:bg-indigo-700 shadow">Enregistrer</button>
+                </div>
             </div>
         </div>
 

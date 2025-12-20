@@ -81,6 +81,8 @@ createApp({
         const newFund = ref({ amount: '', note: '' });
         
         const selectedHistoryMonth = ref(null); // Pour l'historique groupé
+        const showEditStartAmountModal = ref(false); // Pour le modal de modification
+        const tempStartAmounts = ref({}); // Pour stocker temporairement les modifs
 
         // ---------------------------------------------------------
         // --- LOGIQUE SALAIRE ---
@@ -322,7 +324,7 @@ createApp({
                     if (!snapshot.empty) {
                         const docData = snapshot.docs[0]; currentSession.value = { id: docData.id, ...docData.data() }; startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
                         onSnapshot(collection(db, "transactions"), where("sessionId", "==", docData.id), (txSnap) => { transactions.value = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })); });
-                    } else { currentSession.value = null; transactions.value = []; }
+                    } else { currentSession.value = null; transactions.value = []; loadLastClosedSession(); }
                 });
                 onSnapshot(query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc")), (snap) => { closedSessions.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
                 onSnapshot(collection(db, "clients"), (snap) => { clientDatabase.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
@@ -533,6 +535,51 @@ createApp({
             loading.value = true;
             try { await addDoc(collection(db, "sessions"), { startTime: Timestamp.now(), status: "OPEN", startAmount: startAmounts.value, openedBy: user.value.email }); } catch (e) { alert(e.message); } finally { loading.value = false; }
         };
+        // Charge les montants de la dernière fermeture pour pré-remplir l'ouverture
+        const loadLastClosedSession = async () => {
+            try {
+                // On cherche la session fermée la plus récente
+                const q = query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc"), limit(1));
+                const snap = await getDocs(q);
+                
+                if (!snap.empty) {
+                    const lastData = snap.docs[0].data();
+                    // Si on a des montants de clôture, on les met dans startAmounts
+                    if (lastData.closingAmounts) {
+                        startAmounts.value = {
+                            espece: lastData.closingAmounts.espece || lastData.totalsComputed.espece || 0, // Fallback sur le calculé si pas saisi (pour espèce)
+                            om: lastData.closingAmounts.om || 0,
+                            wave: lastData.closingAmounts.wave || 0
+                        };
+                    }
+                }
+            } catch (e) { console.log("Pas de session précédente trouvée ou erreur", e); }
+        };
+        // Ouvre le modal de modification
+        const openEditStartAmounts = () => {
+            // On copie les valeurs actuelles
+            tempStartAmounts.value = { ...startAmounts.value }; 
+            showEditStartAmountModal.value = true;
+        };
+
+        // Sauvegarde la modification dans Firebase
+        const saveEditedStartAmounts = async () => {
+            if (!currentSession.value) return;
+            try {
+                // Mise à jour de la session en base
+                await updateDoc(doc(db, "sessions", currentSession.value.id), {
+                    startAmount: tempStartAmounts.value
+                });
+                
+                // Mise à jour locale immédiate
+                startAmounts.value = { ...tempStartAmounts.value };
+                // Mise à jour de l'objet session local
+                currentSession.value.startAmount = { ...tempStartAmounts.value };
+                
+                showEditStartAmountModal.value = false;
+                alert("Fonds de caisse mis à jour !");
+            } catch (e) { alert("Erreur : " + e.message); }
+        };
 
         const addTransaction = async () => {
             if (!isAdmin.value) return alert("Refusé");
@@ -629,9 +676,25 @@ createApp({
         const confirmClose = async () => {
             if (!currentSession.value) return;
             try {
-                await updateDoc(doc(db, "sessions", currentSession.value.id), { endTime: Timestamp.now(), status: "CLOSED", totalsComputed: totals.value, closingAmounts: closing.value, gaps: { om: closing.value.om - totals.value.om, wave: closing.value.wave - totals.value.wave } });
-                showClosingModal.value = false; startAmounts.value = { espece:0, om:0, wave:0 };
-            } catch (e) { alert("Erreur clôture"); }
+                await updateDoc(doc(db, "sessions", currentSession.value.id), { 
+                    endTime: Timestamp.now(), 
+                    status: "CLOSED", 
+                    totalsComputed: totals.value, 
+                    closingAmounts: closing.value, 
+                    gaps: { om: closing.value.om - totals.value.om, wave: closing.value.wave - totals.value.wave } 
+                });
+                
+                showClosingModal.value = false; 
+                
+                // NETTOYAGE COMPLET
+                currentSession.value = null;
+                transactions.value = []; // On vide le journal visuellement
+                startAmounts.value = { espece:0, om:0, wave:0 }; // On remet à zéro en attendant le rechargement
+                
+                // On recharge pour voir si on peut récupérer les montants qu'on vient de fermer
+                loadLastClosedSession();
+
+            } catch (e) { alert("Erreur clôture : " + e.message); }
         };
 
         const openHistoryDetails = async (sess) => {
@@ -734,7 +797,7 @@ createApp({
             currentView, currentSession, transactions, visibleTransactions, loading, startAmounts, form, closing, billets, totals, totalEspeceCompte, showClosingModal,
             closedSessions, showHistoryModal, selectedSessionHistory, selectedTransactionsHistory, visibleHistoryTransactions, openHistoryDetails,
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
-            startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction,
+            startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
             saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, globalSearchResults, isSearchingGlobal,
             
