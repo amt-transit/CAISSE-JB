@@ -5,25 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CaisseManager - Pro</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link rel="stylesheet" href="style.css">
 
-    <style>
-        body { background-color: #f3f4f6; font-family: sans-serif; }
-        .table-compact th, .table-compact td { padding: 4px 8px; border: 1px solid #e5e7eb; white-space: nowrap; }
-        .table-compact th { background-color: #f3f4f6; font-size: 11px; text-transform: uppercase; color: #6b7280; }
-        .table-compact td { font-size: 12px; }
-        [v-cloak] { display: none; }
-        
-        /* Tontine Cards */
-        .tontine-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border-top: 4px solid #cbd5e1; }
-        .tontine-card.winner { border-top-color: #10b981; background-color: #ecfdf5; }
-    </style>
 </head>
 <body class="text-gray-800 text-sm">
 
@@ -121,6 +110,10 @@
                                     <div><label class="text-[10px] text-gray-500">Montant</label><input type="number" v-model.number="form.amount" class="w-full p-1 border rounded text-sm font-mono font-bold" required></div>
                                     <div class="flex justify-between items-center bg-gray-50 p-1 rounded border">
                                         <div class="flex items-center gap-2 cursor-pointer" @click="form.isHidden = !form.isHidden"><div class="w-4 h-4 border rounded flex items-center justify-center" :class="form.isHidden ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'"><i v-if="form.isHidden" class="fa-solid fa-check text-white text-[8px]"></i></div><span class="text-[10px] text-gray-600">Cacher</span></div>
+                                        <div class="flex items-center gap-1 cursor-pointer bg-red-50 px-1 rounded border border-red-100" @click="form.isPendingIdentity = !form.isPendingIdentity">
+                                            <div class="w-4 h-4 border rounded flex items-center justify-center bg-white" :class="form.isPendingIdentity ? 'bg-red-600 border-red-600' : 'border-gray-300'"><i v-if="form.isPendingIdentity" class="fa-solid fa-check text-white text-[8px]"></i></div>
+                                            <span class="text-[9px] font-bold text-red-600"><i class="fa-solid fa-circle-question"></i> Inconnu</span>
+                                        </div>
                                         <div class="flex items-center gap-2 cursor-pointer" @click="form.isBill = !form.isBill"><div class="w-4 h-4 border rounded flex items-center justify-center" :class="form.isBill ? 'bg-orange-500 border-orange-500' : 'border-gray-300'"><i v-if="form.isBill" class="fa-solid fa-check text-white text-[8px]"></i></div><span class="text-[10px] text-orange-600 font-bold">Facture (0%)</span></div>
                                     </div>
                                     <button type="submit" class="w-full mt-2 bg-indigo-700 text-white font-bold py-2 rounded shadow text-xs">AJOUTER</button>
@@ -129,18 +122,53 @@
                         </div>
 
                         <div :class="isAdmin ? 'lg:w-3/4' : 'w-full'" class="flex flex-col bg-white rounded shadow h-full overflow-hidden">
-                            <div class="p-2 bg-gray-50 border-b flex justify-between items-center">
-                                <div class="flex items-center gap-4"><h3 class="font-bold text-gray-700 text-sm">Journal ({{ visibleTransactions.length }})</h3><label v-if="isAdmin" class="flex items-center gap-1 cursor-pointer select-none"><input type="checkbox" v-model="showHiddenTransactions" class="rounded text-indigo-600 w-3 h-3"><span class="text-[10px] text-gray-600 font-bold">Voir Interne</span></label></div>
-                                <div class="flex gap-2"><button v-if="isAdmin" @click="exportToExcel(visibleTransactions, 'Journal')" class="bg-green-600 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button><button v-if="isAdmin" @click="exportToPDF" class="bg-red-600 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button><button v-if="isAdmin" @click="openClosingModal" class="bg-gray-800 text-white px-2 py-1 rounded text-xs ml-2 hover:bg-black shadow"><i class="fa-solid fa-lock mr-1"></i>Clôturer</button></div>
+                            <div class="p-2 bg-gray-50 border-b flex flex-col gap-2">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="font-bold text-gray-700 text-sm flex items-center gap-2">
+                                        Journal 
+                                        <span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-[10px]">{{ visibleTransactions.length }}</span>
+                                    </h3>
+                                    
+                                    <div class="flex gap-2">
+                                        <button v-if="isAdmin" @click="exportToExcel(visibleTransactions, 'Journal')" class="bg-green-600 text-white px-2 py-1 rounded text-[10px] shadow" title="Excel"><i class="fa-solid fa-file-excel"></i></button>
+                                        <button v-if="isAdmin" @click="exportToPDF" class="bg-red-600 text-white px-2 py-1 rounded text-[10px] shadow" title="PDF"><i class="fa-solid fa-file-pdf"></i></button>
+                                        <button v-if="isAdmin" @click="openClosingModal" class="bg-gray-800 text-white px-2 py-1 rounded text-[10px] ml-2 hover:bg-black shadow" title="Clôturer"><i class="fa-solid fa-lock"></i></button>
+                                    </div>
+                                </div>
+
+                                <div v-if="isAdmin" class="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                                    <button @click="activeQuickFilter = 'ALL'" :class="activeQuickFilter === 'ALL' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition">Tout</button>
+                                    
+                                    <button @click="activeQuickFilter = 'UNKNOWN'" :class="activeQuickFilter === 'UNKNOWN' ? 'bg-red-500 text-white shadow-md' : 'bg-white text-red-500 border border-red-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                                        <i class="fa-solid fa-circle-question"></i> Inconnus
+                                    </button>
+                                    
+                                    <button @click="activeQuickFilter = 'RECOVERED'" :class="activeQuickFilter === 'RECOVERED' ? 'bg-green-500 text-white shadow-md' : 'bg-white text-green-600 border border-green-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                                        <i class="fa-solid fa-check-double"></i> Retrouvés
+                                    </button>
+
+                                    <button @click="activeQuickFilter = 'FACTLURE'" :class="activeQuickFilter === 'BILL' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-orange-500 border border-orange-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                                        <i class="fa-solid fa-file-invoice"></i> Factures
+                                    </button>
+
+                                    <button @click="activeQuickFilter = 'HIDDEN'" :class="activeQuickFilter === 'HIDDEN' ? 'bg-gray-600 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                                        <i class="fa-solid fa-eye-slash"></i> Cachés
+                                    </button>
+                                </div>
                             </div>
                             <div class="flex-grow overflow-auto">
                                 <table class="w-full text-left border-collapse table-compact">
                                     <thead class="sticky top-0 z-10 shadow-sm"><tr><th>Date / Heure</th><th>Rèf</th><th>Expéditeur</th><th>Destinataire</th><th class="text-center">Mode</th><th class="text-right">Montant</th><th class="text-right">Solde Colis</th><th v-if="isAdmin" class="w-6"></th></tr></thead>
                                     <tbody class="bg-white">
-                                        <tr v-for="tx in visibleTransactions" :key="tx.id" class="hover:bg-blue-50 group" :class="{'bg-yellow-50': tx.isHidden}">
+                                        <tr v-for="tx in visibleTransactions" :key="tx.id" class="hover:bg-blue-50 group border-b" :class="{'bg-yellow-50': tx.isHidden, 'bg-red-100': tx.isPendingIdentity}">
                                             <td class="text-gray-500 text-[10px] leading-tight"><div class="font-bold">{{ formatDate(tx.timestamp) }}</div><div>{{ formatTime(tx.timestamp) }}</div></td>
                                             <td class="font-mono font-bold text-indigo-700">{{ tx.reference || '' }}</td>
-                                            <td class="text-gray-800 font-medium truncate max-w-[150px]"><i v-if="tx.isHidden" class="fa-solid fa-eye-slash text-gray-400 mr-1 text-[10px]"></i>{{ tx.label }}</td>
+                                            <td class="text-gray-800 font-medium truncate max-w-[150px]">
+                                                <i v-if="tx.isHidden" class="fa-solid fa-eye-slash text-gray-400 mr-1 text-[10px]"></i>
+                                                <i v-if="tx.isPendingIdentity" class="fa-solid fa-triangle-exclamation text-red-600 mr-1 text-[10px] animate-pulse" title="Inconnu"></i>
+                                                <i v-if="tx.wasRecovered && !tx.isPendingIdentity" class="fa-solid fa-check-double text-green-500 mr-1 text-[10px]" title="Retrouvé"></i>
+                                                {{ tx.label }}
+                                            </td>
                                             <td class="text-gray-600 truncate max-w-[150px]">{{ tx.recipient }}</td>
                                             <td class="text-center"><span class="px-1 py-0.5 rounded text-[9px] font-bold border" :class="getBadgeClass(tx.category)">{{ getModeAbbr(tx.category) }}</span></td>
                                             <td class="text-right font-mono font-bold" :class="tx.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'">{{ formatMoney(tx.amount - (tx.fees || 0)) }}</td>
@@ -159,19 +187,54 @@
             </div>
 
             <div v-if="currentView === 'history'" class="bg-white rounded shadow p-4">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-gray-700">
-                        <span v-if="!isSearchingGlobal">Historique Sessions</span>
-                        <span v-else class="text-orange-600">Résultats Recherche ({{ globalSearchResults.length }})</span>
-                    </h3>
+                
+                <div class="flex flex-col gap-4 mb-4 border-b pb-4">
                     
-                    <div class="flex gap-2">
-                        <div class="relative w-72">
-                            <input type="text" v-model="historySearchQuery" @keyup.enter="performGlobalSearch" placeholder="Date (YYYY-MM-DD), Nom ou Rèf..." class="w-full pl-8 pr-2 py-1 border rounded text-xs border-indigo-200 bg-indigo-50 focus:bg-white transition outline-none focus:ring-2 focus:ring-indigo-500">
-                            <i class="fa-solid fa-search absolute left-2.5 top-1.5 text-gray-400 text-xs"></i>
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold text-gray-700">
+                            <span v-if="!isSearchingGlobal">Historique Sessions</span>
+                            <span v-else class="text-orange-600">Résultats : {{ filteredGlobalResults.length }}</span>
+                        </h3>
+                        
+                        <div class="flex gap-2">
+                            <div class="relative w-64">
+                                <input type="text" v-model="historySearchQuery" @keyup.enter="performGlobalSearch" placeholder="Date, Nom ou Rèf..." class="w-full pl-8 pr-2 py-1 border rounded text-xs border-indigo-200 bg-indigo-50 focus:bg-white transition outline-none focus:ring-2 focus:ring-indigo-500">
+                                <i class="fa-solid fa-search absolute left-2.5 top-1.5 text-gray-400 text-xs"></i>
+                            </div>
+                            <button @click="performGlobalSearch" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-indigo-700">Chercher</button>
+                            
+                            <button @click="isSearchingGlobal ? null : exportHistoryTablePDF()" v-if="!isSearchingGlobal" class="bg-red-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-700 shadow flex items-center gap-1">
+                                <i class="fa-solid fa-file-pdf"></i> PDF
+                            </button>
+                            
+                            <button v-if="isSearchingGlobal" @click="isSearchingGlobal = false; historySearchQuery = ''; globalSearchResults = []" class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-bold hover:bg-gray-300">Fermer</button>
                         </div>
-                        <button @click="performGlobalSearch" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-indigo-700">Chercher</button>
-                        <button v-if="isSearchingGlobal" @click="historySearchQuery = ''; performGlobalSearch()" class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-bold hover:bg-gray-300">X</button>
+                    </div>
+
+                    <div class="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                        <button @click="isSearchingGlobal = false" :class="!isSearchingGlobal ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition">
+                            <i class="fa-solid fa-list mr-1"></i> Sessions
+                        </button>
+                        
+                        <button @click="triggerSmartFilter('ALL')" :class="isSearchingGlobal && historyFilterState === 'ALL' ? 'bg-gray-800 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition">
+                            Tout (Détails)
+                        </button>
+                        
+                        <button @click="triggerSmartFilter('UNKNOWN')" :class="isSearchingGlobal && historyFilterState === 'UNKNOWN' ? 'bg-red-500 text-white shadow-md' : 'bg-white text-red-500 border border-red-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                            <i class="fa-solid fa-circle-question"></i> Inconnus
+                        </button>
+                        
+                        <button @click="triggerSmartFilter('RECOVERED')" :class="isSearchingGlobal && historyFilterState === 'RECOVERED' ? 'bg-green-500 text-white shadow-md' : 'bg-white text-green-600 border border-green-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                            <i class="fa-solid fa-check-double"></i> Retrouvés
+                        </button>
+
+                        <button @click="triggerSmartFilter('BILL')" :class="isSearchingGlobal && historyFilterState === 'BILL' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-orange-500 border border-orange-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                            <i class="fa-solid fa-file-invoice"></i> Factures
+                        </button>
+
+                        <button @click="triggerSmartFilter('HIDDEN')" :class="isSearchingGlobal && historyFilterState === 'HIDDEN' ? 'bg-gray-600 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-200'" class="px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1">
+                            <i class="fa-solid fa-eye-slash"></i> Cachés
+                        </button>
                     </div>
                 </div>
 
@@ -181,18 +244,21 @@
                             <tr><th>Date</th><th>Rèf</th><th>Expéditeur</th><th>Destinataire</th><th class="text-center">Mode</th><th class="text-right">Montant</th></tr>
                         </thead>
                         <tbody>
-                            <tr v-for="tx in globalSearchResults" :key="tx.id" class="hover:bg-orange-50">
+                            <tr v-for="tx in filteredGlobalResults" :key="tx.id" class="hover:bg-orange-50 bg-white border-b" :class="{'bg-red-50': tx.isPendingIdentity, 'bg-yellow-50': tx.isHidden}">
                                 <td class="text-gray-600">{{ formatDateTime(tx.timestamp) }}</td>
                                 <td class="font-bold text-indigo-700">{{ tx.reference }}</td>
-                                <td class="font-bold">{{ tx.label }}</td>
+                                <td class="font-bold">
+                                    <i v-if="tx.isHidden" class="fa-solid fa-eye-slash text-gray-400 mr-1 text-[10px]"></i>
+                                    <i v-if="tx.isPendingIdentity" class="fa-solid fa-triangle-exclamation text-red-600 mr-1 text-[10px]" title="Inconnu"></i>
+                                    <i v-if="tx.wasRecovered && !tx.isPendingIdentity" class="fa-solid fa-check-double text-green-500 mr-1 text-[10px]" title="Retrouvé"></i>
+                                    {{ tx.label }}
+                                </td>
                                 <td>{{ tx.recipient }}</td>
                                 <td class="text-center">{{ getModeAbbr(tx.category) }}</td>
                                 <td class="text-right font-mono font-bold" :class="tx.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'">{{ formatMoney(tx.amount) }}</td>
                             </tr>
-                            <tr v-if="globalSearchResults.length === 0">
-                                <td colspan="6" class="text-center py-8 text-gray-500">
-                                    Aucune transaction trouvée pour "{{ historySearchQuery }}".
-                                </td>
+                            <tr v-if="filteredGlobalResults.length === 0">
+                                <td colspan="6" class="text-center py-8 text-gray-500">Aucune transaction trouvée pour ce filtre (sur les 500 dernières).</td>
                             </tr>
                         </tbody>
                     </table>
@@ -202,7 +268,7 @@
                     <table class="w-full text-left table-compact">
                         <thead><tr><th>Date Fermeture</th><th class="text-right">Entrées</th><th class="text-right">Sorties</th><th class="text-right">Espèce</th><th class="text-right">OM</th><th class="text-right">Wave</th><th class="text-center">Action</th></tr></thead>
                         <tbody>
-                            <tr v-for="sess in closedSessions" :key="sess.id" class="hover:bg-gray-50">
+                            <tr v-for="sess in filteredHistory" :key="sess.id" class="hover:bg-gray-50">
                                 <td class="font-bold text-gray-600">{{ formatDateTime(sess.endTime) }}</td>
                                 <td class="text-right text-green-600">{{ sess.flux ? formatMoney(sess.flux.credit) : '-' }}</td>
                                 <td class="text-right text-red-600">{{ sess.flux ? formatMoney(sess.flux.debit) : '-' }}</td>
@@ -214,6 +280,7 @@
                         </tbody>
                     </table>
                 </div>
+
             </div>
 
             <div v-if="currentView === 'database' && isAdmin" class="bg-white rounded shadow p-4">
@@ -367,6 +434,12 @@
                     <div class="flex gap-2"><div class="w-1/2"><label class="text-xs text-gray-500">Réf</label><input type="text" v-model="editingTx.reference" class="w-full p-1 border rounded text-xs"></div><div class="w-1/2"><label class="text-xs text-gray-500">Expéditeur</label><input type="text" v-model="editingTx.label" class="w-full p-1 border rounded text-xs"></div></div>
                     <div><label class="text-xs text-gray-500">Destinataire</label><input type="text" v-model="editingTx.recipient" class="w-full p-1 border rounded text-xs"></div>
                     <div class="flex gap-2"><div class="w-1/2"><label class="text-xs text-gray-500">Montant</label><input type="number" v-model.number="editingTx.amount" class="w-full p-1 border rounded text-xs font-bold"></div><div class="w-1/2"><label class="text-xs text-gray-500">Compte</label><select v-model="editingTx.category" class="w-full p-1 border rounded text-xs"><option value="ESPECE">Espèces</option><option value="OM">OM</option><option value="WAVE">Wave</option></select></div></div>
+                    <div class="flex items-center gap-2 mt-2 bg-red-50 p-2 rounded border border-red-100 cursor-pointer" @click="editingTx.isPendingIdentity = !editingTx.isPendingIdentity">
+                        <div class="w-4 h-4 border rounded flex items-center justify-center bg-white" :class="editingTx.isPendingIdentity ? 'bg-red-600 border-red-600' : 'border-gray-300'">
+                            <i v-if="editingTx.isPendingIdentity" class="fa-solid fa-check text-white text-[8px]"></i>
+                        </div>
+                        <span class="text-xs font-bold text-red-600">Marquer comme "À Identifier"</span>
+                    </div>
                     <div class="flex justify-end gap-2 mt-4"><button type="button" @click="showEditTransactionModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs">Annuler</button><button type="submit" class="px-3 py-1 bg-orange-600 text-white rounded text-xs font-bold">Mettre à jour</button></div>
                 </form>
             </div>

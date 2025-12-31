@@ -1,23 +1,15 @@
 /* style.css */
 body { 
-    background-color: #dce7fd; 
+    background-color: #f3f4f6; /* J'ai remis le gris clair de Tailwind pour faire plus propre, ou gardez votre bleu #dce7fd */
+    font-family: sans-serif;
 }
 
-/* Police type "machine à écrire" pour les chiffres financiers */
-.input-money { 
-    font-family: 'Courier New', Courier, monospace; 
-    font-weight: bold; 
-}
+/* Vos classes perso */
+.table-compact th, .table-compact td { padding: 4px 8px; border: 1px solid #e5e7eb; white-space: nowrap; }
+.table-compact th { background-color: #f3f4f6; font-size: 11px; text-transform: uppercase; color: #6b7280; }
+.table-compact td { font-size: 12px; }
 
-/* Cache l'application tant que Vue n'est pas chargé pour éviter l'effet de clignotement */
-[v-cloak] { 
-    display: none; 
-}
+[v-cloak] { display: none; }
 
-/* Transitions pour les éléments (Optionnel mais joli) */
-.fade-enter-active, .fade-leave-active {
-    transition: opacity 0.3s ease;
-}
-.fade-enter-from, .fade-leave-to {
-    opacity: 0;
-}
+.tontine-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border-top: 4px solid #cbd5e1; }
+.tontine-card.winner { border-top-color: #10b981; background-color: #ecfdf5; }

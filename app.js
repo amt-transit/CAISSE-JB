@@ -1,6 +1,6 @@
 import { createApp, ref, computed, onMounted, watch } from "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, setDoc, deleteDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDocs, Timestamp, writeBatch, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, setDoc, deleteDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDocs, Timestamp, writeBatch, getDoc, limit } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 
 // ---------------------------------------------------------
@@ -38,7 +38,7 @@ createApp({
         const transactions = ref([]);
         const loading = ref(false);
         const startAmounts = ref({ espece: 0, om: 0, wave: 0 });
-        const form = ref({ type: 'CREDIT', category: 'ESPECE', amount: '', label: '', recipient: '', reference: '', date: new Date().toISOString().split('T')[0], expectedPrice: 0, isHidden: false, isBill: false });
+        const form = ref({ type: 'CREDIT', category: 'ESPECE', amount: '', label: '', recipient: '', reference: '', date: new Date().toISOString().split('T')[0], expectedPrice: 0, isHidden: false, isBill: false, isPendingIdentity: false });
         const closing = ref({ om: 0, wave: 0 });
         const showClosingModal = ref(false);
         const billets = ref([ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ]);
@@ -53,6 +53,7 @@ createApp({
         const editingTx = ref({}); // NOUVEAU (Données en cours de modif)
         const originalTxState = ref({}); // NOUVEAU (Pour se souvenir de l'état avant modif)
         const historySearchQuery = ref('');
+        const activeQuickFilter = ref('ALL'); // Filtre actif: ALL, HIDDEN, UNKNOWN, BILL, RECOVERED
         
         // --- DONNEES DATABASE CLIENT ---
         const clientDatabase = ref([]);
@@ -271,7 +272,28 @@ createApp({
         const totalEspeceCompte = computed(() => billets.value.reduce((acc, b) => acc + (b.val * (b.count || 0)), 0));
 
         const visibleTransactions = computed(() => {
-            let filtered = isAdmin.value ? (showHiddenTransactions.value ? transactions.value : transactions.value.filter(t => !t.isHidden)) : transactions.value.filter(t => !t.isHidden);
+            // 1. Filtrage de base (Admin ou pas)
+            let filtered = transactions.value;
+            if (!isAdmin.value) {
+                filtered = filtered.filter(t => !t.isHidden);
+            }
+
+            // 2. Application du Filtre Rapide (Quick Filter)
+            if (activeQuickFilter.value === 'HIDDEN') {
+                filtered = filtered.filter(t => t.isHidden);
+            } else if (activeQuickFilter.value === 'UNKNOWN') {
+                filtered = filtered.filter(t => t.isPendingIdentity);
+            } else if (activeQuickFilter.value === 'BILL') {
+                filtered = filtered.filter(t => t.isBill);
+            } else if (activeQuickFilter.value === 'RECOVERED') {
+                filtered = filtered.filter(t => t.wasRecovered);
+            } else if (activeQuickFilter.value === 'ALL') {
+                if (isAdmin.value && !showHiddenTransactions.value) {
+                     filtered = filtered.filter(t => !t.isHidden);
+                }
+            }
+
+            // 3. Tri par date
             return filtered.sort((a, b) => {
                 const orderMap = { 'ESPECE': 1, 'WAVE': 2, 'OM': 3, 'BANQUE': 4 };
                 const oA = orderMap[a.category] || 99, oB = orderMap[b.category] || 99;
@@ -429,6 +451,42 @@ createApp({
                 console.error("Erreur recherche", e);
             }
         };
+        // --- NOUVEAU : Fonction pour les boutons "Un clic" ---
+        const triggerSmartFilter = async (type) => {
+            // 1. On active le mode "Résultat"
+            isSearchingGlobal.value = true;
+            historyFilterState.value = type; // On applique le filtre (ex: UNKNOWN)
+            historySearchQuery.value = ""; // On vide la barre de texte pour éviter la confusion
+
+            // 2. On charge les dernières données (ex: 500 dernières) pour avoir de la matière à filtrer
+            try {
+                // Si on a déjà des données chargées, on ne recharge pas pour aller vite
+                if (globalSearchResults.value.length > 0) return;
+
+                const q = query(collection(db, "transactions"), orderBy('timestamp', 'desc'), limit(500));
+                const snap = await getDocs(q);
+                globalSearchResults.value = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+            } catch (e) { console.error("Erreur chargement filtre", e); }
+        };
+        // --- FILTRES POUR L'HISTORIQUE ---
+        const historyFilterState = ref('ALL'); // ALL, UNKNOWN, RECOVERED, BILL, HIDDEN
+
+        const filteredGlobalResults = computed(() => {
+            let res = globalSearchResults.value;
+
+            if (historyFilterState.value === 'UNKNOWN') {
+                res = res.filter(t => t.isPendingIdentity);
+            } else if (historyFilterState.value === 'RECOVERED') {
+                res = res.filter(t => t.wasRecovered);
+            } else if (historyFilterState.value === 'BILL') {
+                res = res.filter(t => t.isBill);
+            } else if (historyFilterState.value === 'HIDDEN') {
+                res = res.filter(t => t.isHidden);
+            }
+            
+            return res;
+        });
 
         // On surveille la barre de recherche pour déclencher ou annuler
         watch(historySearchQuery, (newVal) => {
@@ -441,6 +499,7 @@ createApp({
             editingTx.value.label = c.EXPEDITEUR;
             editingTx.value.recipient = c.DESTINATEUR || '';
             editingTx.value.expectedPrice = c.PRIX;
+            editingTx.value.isPendingIdentity = false;
             searchQuery.value = c.EXPEDITEUR; // Affiche le nom choisi
             showSuggestions.value = false;
         };
@@ -478,6 +537,16 @@ createApp({
                 // ETAPE C : Mise à jour de la transaction dans la base
                 const selectedDate = new Date(editingTx.value.date);
                 const now = new Date(); selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+                // Détection : Est-ce un colis "Retrouvé" ?
+                // C'est le cas si c'était "Inconnu" (Pending) AVANT, et que ce n'est PLUS "Inconnu" maintenant.
+                let markAsRecovered = false;
+                if (originalTxState.value.isPendingIdentity && !editingTx.value.isPendingIdentity) {
+                    markAsRecovered = true;
+                }
+                // On garde le statut s'il l'était déjà
+                if (originalTxState.value.wasRecovered) {
+                    markAsRecovered = true;
+                }
 
                 await updateDoc(doc(db, "transactions", editingTx.value.id), {
                     reference: editingTx.value.reference,
@@ -486,6 +555,8 @@ createApp({
                     amount: editingTx.value.amount,
                     category: editingTx.value.category,
                     fees: newFees,
+                    isPendingIdentity: editingTx.value.isPendingIdentity, // On sauvegarde l'état coché/décoché
+                    wasRecovered: markAsRecovered, // NOUVEAU CHAMP
                     timestamp: Timestamp.fromDate(selectedDate)
                 });
 
@@ -529,6 +600,37 @@ createApp({
         // METHODS
         const login = async () => { try { await signInWithEmailAndPassword(auth, loginForm.value.email, loginForm.value.password); } catch (e) { loginError.value = "Erreur de connexion"; } };
         const logout = async () => { await signOut(auth); };
+        const exportHistoryTablePDF = () => {
+            if (!window.jspdf) return alert("Erreur PDF");
+            const { jsPDF } = window.jspdf; 
+            const doc = new jsPDF();
+            
+            doc.setFontSize(14);
+            doc.text("Historique des Sessions de Caisse", 14, 20);
+            doc.setFontSize(10);
+            doc.text(`Exporté le : ${new Date().toLocaleDateString()}`, 14, 26);
+
+            // On utilise filteredHistory pour respecter la recherche en cours s'il y en a une
+            const data = filteredHistory.value.map(s => [
+                formatDateTime(s.endTime),
+                s.flux ? formatMoney(s.flux.credit) : '-',
+                s.flux ? formatMoney(s.flux.debit) : '-',
+                formatMoney(s.totalsComputed?.espece),
+                formatMoney(s.totalsComputed?.om),
+                formatMoney(s.totalsComputed?.wave)
+            ]);
+
+            doc.autoTable({ 
+                head: [["Fermeture", "Entrées", "Sorties", "Solde Espèce", "Solde OM", "Solde Wave"]], 
+                body: data, 
+                startY: 35,
+                theme: 'grid',
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [67, 56, 202] } // Couleur Indigo
+            });
+            
+            doc.save("Historique_Sessions.pdf");
+        };
         
         const startSession = async () => {
             if (!startAmounts.value.espece && startAmounts.value.espece !== 0) return alert("Montant Espèce requis");
@@ -602,7 +704,7 @@ createApp({
 
             try {
                 // 1. Enregistrement Transaction
-                await addDoc(collection(db, "transactions"), { sessionId: currentSession.value.id, ...form.value, expectedPrice: form.value.expectedPrice || 0, recipient: form.value.recipient || '', isHidden: form.value.isHidden || false, isBill: form.value.isBill || false, fees: fees, timestamp: Timestamp.fromDate(selectedDate) });
+                await addDoc(collection(db, "transactions"), { sessionId: currentSession.value.id, ...form.value, expectedPrice: form.value.expectedPrice || 0, recipient: form.value.recipient || '', isHidden: form.value.isHidden || false, isBill: form.value.isBill || false, isPendingIdentity: form.value.isPendingIdentity || false, fees: fees, timestamp: Timestamp.fromDate(selectedDate) });
                 
                 // 2. GESTION CLIENT / PRESTATAIRE (AUTO-APPRENTISSAGE)
                 
@@ -649,7 +751,7 @@ createApp({
                 }
                 
                 // Reset Formulaire
-                form.value.label = ''; form.value.recipient = ''; form.value.reference = ''; form.value.amount = ''; form.value.expectedPrice = 0; form.value.isHidden = false; form.value.isBill = false;
+                form.value.label = ''; form.value.recipient = ''; form.value.reference = ''; form.value.amount = ''; form.value.expectedPrice = 0; form.value.isHidden = false; form.value.isBill = false; form.value.isPendingIdentity = false;
             } catch (e) { console.error(e); alert("Erreur ajout : " + e.message); }
         };
 
@@ -799,11 +901,12 @@ createApp({
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
-            saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, globalSearchResults, isSearchingGlobal,
+            saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, triggerSmartFilter,
+             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults,
             
             // EXPORTS SALAIRE
             currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, 
-            showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, showFundModal,
+            showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, showFundModal, activeQuickFilter, exportHistoryTablePDF,
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory,
