@@ -80,10 +80,23 @@ createApp({
         const selectedEmployeeHistoryName = ref('');
         const payForm = ref({});
         const newFund = ref({ amount: '', note: '' });
+        // PARAMETRE GLOBAL TONTINE
+        const globalTontineAmount = ref(10000); // Valeur par défaut
+        
+        const saveGlobalTontine = async () => {
+            if(!isAdmin.value) return;
+            try {
+                // On sauvegarde dans une collection 'settings', document 'salary'
+                await setDoc(doc(db, "settings", "salary"), { tontineAmount: globalTontineAmount.value }, { merge: true });
+                alert("Nouveau montant de tontine enregistré !");
+            } catch(e) { alert("Erreur : " + e.message); }
+        };
         
         const selectedHistoryMonth = ref(null); // Pour l'historique groupé
         const showEditStartAmountModal = ref(false); // Pour le modal de modification
         const tempStartAmounts = ref({}); // Pour stocker temporairement les modifs
+
+        let unsubscribeTransactions = null;
 
         // ---------------------------------------------------------
         // --- LOGIQUE SALAIRE ---
@@ -111,7 +124,13 @@ createApp({
         const saveNewEmployee = async () => {
             if(!newEmp.value.name || !newEmp.value.salary) return;
             try {
-                await addDoc(collection(db, "employees"), { name: newEmp.value.name, salary: newEmp.value.salary, loan: newEmp.value.loan || 0, isTontine: newEmp.value.isTontine });
+                await addDoc(collection(db, "employees"), { 
+                    name: newEmp.value.name, 
+                    salary: newEmp.value.salary, 
+                    loan: newEmp.value.loan || 0, 
+                    isTontine: newEmp.value.isTontine
+                    // Plus besoin de tontineAmount ici
+                });
                 showAddEmployeeModal.value = false;
                 newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
             } catch(e) { alert("Erreur: " + e.message); }
@@ -143,7 +162,8 @@ createApp({
         };
         
         const calculateLoanDeduc = (emp) => (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
-        const calculateTontineDeduc = (emp) => (emp.isTontine && paiePeriod.value === "30") ? 15000 : 0;
+        // On utilise la variable globale au lieu du champ employé
+        const calculateTontineDeduc = (emp) => (emp.isTontine) ? globalTontineAmount.value : 0;
         const calculateNet = (emp) => calculateBase(emp) - calculateLoanDeduc(emp) - calculateTontineDeduc(emp);
 
         const unpaidEmployees = computed(() => {
@@ -170,11 +190,10 @@ createApp({
         };
 
         const recalcNet = () => {
-            if (payForm.value.loan > payForm.value.maxLoan) {
-                alert("Impossible : Le remboursement dépasse la dette (" + formatMoney(payForm.value.maxLoan) + ")");
-                payForm.value.loan = payForm.value.maxLoan;
-            }
-            payForm.value.net = payForm.value.base - payForm.value.loan - payForm.value.tontine;
+            if (payForm.value.loan > payForm.value.maxLoan) payForm.value.loan = payForm.value.maxLoan;
+            
+            // MODIFICATION : On inclut la tontine (qui peut être modifiée à 0) dans le calcul
+            payForm.value.net = payForm.value.base - payForm.value.loan - (payForm.value.tontine || 0);
         };
 
         const confirmSalaryPayment = async () => {
@@ -230,10 +249,37 @@ createApp({
         };
         const deleteSalaryFund = async (id) => { if(confirm("Supprimer ?")) await deleteDoc(doc(db, "salary_funds", id)); };
 
+        // STATS DU MOIS EN COURS (Fix Demande)
         const salaryStats = computed(() => {
-            const totalReceived = salaryFunds.value.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-            const totalPaid = salaryHistory.value.reduce((acc, curr) => acc + (curr.net || 0), 0);
+            const currentMonth = new Date().toISOString().slice(0, 7); // Format "2024-01"
+            
+            // Fonction helper pour lire la date peu importe le format (Firestore Timestamp ou Date JS)
+            const getMonthFromObj = (obj) => {
+                if (!obj.timestamp) return '';
+                // Si c'est un Timestamp Firestore (avec toDate)
+                if (typeof obj.timestamp.toDate === 'function') {
+                    return obj.timestamp.toDate().toISOString().slice(0, 7);
+                }
+                // Si c'est déjà une Date JS
+                if (obj.timestamp instanceof Date) {
+                    return obj.timestamp.toISOString().slice(0, 7);
+                }
+                // Si c'est une string ou autre (fallback)
+                return new Date(obj.timestamp).toISOString().slice(0, 7);
+            };
+
+            // On filtre les fonds pour le mois en cours
+            const totalReceived = salaryFunds.value
+                .filter(f => getMonthFromObj(f) === currentMonth)
+                .reduce((acc, curr) => acc + (curr.amount || 0), 0);
+                
+            // On filtre les paiements pour le mois en cours (Ici on utilise directement le champ 'month' qui est déjà une string)
+            const totalPaid = salaryHistory.value
+                .filter(p => p.month === currentMonth)
+                .reduce((acc, curr) => acc + (curr.net || 0), 0);
+                
             const totalLoans = employeesList.value.reduce((acc, curr) => acc + (curr.loan || 0), 0);
+            
             return { totalReceived, totalPaid, balance: totalReceived - totalPaid, totalLoans };
         });
 
@@ -341,12 +387,39 @@ createApp({
         onAuthStateChanged(auth, (u) => {
             user.value = u; authLoading.value = false;
             if (u) {
+                // Dans onAuthStateChanged...
                 const q = query(collection(db, "sessions"), where("status", "==", "OPEN"));
+                
                 onSnapshot(q, (snapshot) => {
+                    // 1. COUPER L'ANCIENNE ÉCOUTE (Arrête de charger les anciennes données)
+                    if (unsubscribeTransactions) { 
+                        unsubscribeTransactions(); 
+                        unsubscribeTransactions = null; 
+                    }
+                    
                     if (!snapshot.empty) {
-                        const docData = snapshot.docs[0]; currentSession.value = { id: docData.id, ...docData.data() }; startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
-                        onSnapshot(collection(db, "transactions"), where("sessionId", "==", docData.id), (txSnap) => { transactions.value = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })); });
-                    } else { currentSession.value = null; transactions.value = []; loadLastClosedSession(); }
+                        // Session trouvée
+                        const docData = snapshot.docs[0]; 
+                        currentSession.value = { id: docData.id, ...docData.data() }; 
+                        startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
+                        
+                        // 2. DÉMARRER LA NOUVELLE ÉCOUTE (Uniquement pour cette session)
+                        const qTx = query(collection(db, "transactions"), where("sessionId", "==", docData.id));
+                        unsubscribeTransactions = onSnapshot(qTx, (txSnap) => { 
+                            transactions.value = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })); 
+                        });
+                    } else { 
+                        // 3. PAS DE SESSION : ON VIDE TOUT (C'est ici que le nettoyage se fait)
+                        currentSession.value = null; 
+                        transactions.value = []; // <--- FORCE LE VIDAGE DU TABLEAU
+                        loadLastClosedSession(); 
+                    }
+                });
+                // AJOUTER CECI : Chargement du paramètre Tontine
+                onSnapshot(doc(db, "settings", "salary"), (docSnap) => {
+                    if (docSnap.exists()) {
+                        globalTontineAmount.value = docSnap.data().tontineAmount || 10000;
+                    }
                 });
                 onSnapshot(query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc")), (snap) => { closedSessions.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
                 onSnapshot(collection(db, "clients"), (snap) => { clientDatabase.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
@@ -635,7 +708,12 @@ createApp({
         const startSession = async () => {
             if (!startAmounts.value.espece && startAmounts.value.espece !== 0) return alert("Montant Espèce requis");
             loading.value = true;
-            try { await addDoc(collection(db, "sessions"), { startTime: Timestamp.now(), status: "OPEN", startAmount: startAmounts.value, openedBy: user.value.email }); } catch (e) { alert(e.message); } finally { loading.value = false; }
+            try { 
+                // SECURITÉ : On vide le tableau visuel avant de commencer
+                transactions.value = []; 
+                
+                await addDoc(collection(db, "sessions"), { startTime: Timestamp.now(), status: "OPEN", startAmount: startAmounts.value, openedBy: user.value.email }); 
+            } catch (e) { alert(e.message); } finally { loading.value = false; }
         };
         // Charge les montants de la dernière fermeture pour pré-remplir l'ouverture
         const loadLastClosedSession = async () => {
@@ -778,24 +856,25 @@ createApp({
         const confirmClose = async () => {
             if (!currentSession.value) return;
             try {
+                // Fermeture dans la base de données
                 await updateDoc(doc(db, "sessions", currentSession.value.id), { 
-                    endTime: Timestamp.now(), 
-                    status: "CLOSED", 
-                    totalsComputed: totals.value, 
-                    closingAmounts: closing.value, 
+                    endTime: Timestamp.now(), status: "CLOSED", totalsComputed: totals.value, closingAmounts: closing.value, 
                     gaps: { om: closing.value.om - totals.value.om, wave: closing.value.wave - totals.value.wave } 
                 });
-                
                 showClosingModal.value = false; 
                 
-                // NETTOYAGE COMPLET
-                currentSession.value = null;
-                transactions.value = []; // On vide le journal visuellement
-                startAmounts.value = { espece:0, om:0, wave:0 }; // On remet à zéro en attendant le rechargement
+                // COUPER IMMEDIATEMENT LE LIEN AVEC LA BASE
+                if (unsubscribeTransactions) { 
+                    unsubscribeTransactions(); 
+                    unsubscribeTransactions = null; 
+                }
                 
-                // On recharge pour voir si on peut récupérer les montants qu'on vient de fermer
-                loadLastClosedSession();
-
+                // NETTOYAGE VISUEL
+                transactions.value = []; // <--- Le journal disparaît
+                currentSession.value = null;
+                startAmounts.value = { espece:0, om:0, wave:0 };
+                
+                setTimeout(loadLastClosedSession, 500); 
             } catch (e) { alert("Erreur clôture : " + e.message); }
         };
 
@@ -876,12 +955,35 @@ createApp({
 
         const exportToExcel = (data, title) => { const ws = XLSX.utils.json_to_sheet(data.map(t => ({ Date: formatDate(t.timestamp), Ref: t.reference, Exp: t.label, Dest: t.recipient, Type: t.type, Cat: t.category, Montant: t.amount }))); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Feuille1"); XLSX.writeFile(wb, title + ".xlsx"); };
         
-        const exportToPDF = () => {
+        const exportToPDF = (customData = null, customTitle = "Journal de Caisse") => {
             if (!window.jspdf) return alert("Erreur PDF");
-            const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.text("Journal de Caisse", 14, 15);
-            const list = visibleTransactions.value;
-            doc.autoTable({ head: [["Date", "Réf", "Expéditeur", "Destinataire", "Mode", "Montant"]], body: list.map(tx => [formatDate(tx.timestamp)+'\n'+formatTime(tx.timestamp), tx.reference||'-', tx.label+(tx.isHidden?' (INT)':''), tx.recipient||'', getModeAbbr(tx.category), formatMoney(tx.amount-(tx.fees||0)).replace(/\s/g,' ')]), startY: 30, theme: 'grid', styles: {fontSize:8}, columnStyles: {0:{cellWidth:20}, 4:{cellWidth:15, halign:'center'}, 5:{halign:'right', fontStyle:'bold'}} });
-            doc.save("Journal.pdf");
+            const { jsPDF } = window.jspdf; 
+            const doc = new jsPDF(); 
+            
+            // Si c'est un clic depuis le bouton simple (événement), on remet les valeurs par défaut
+            const title = (typeof customTitle === 'string') ? customTitle : "Journal de Caisse";
+            doc.text(title, 14, 15);
+            
+            // MAGIE ICI : Si on donne des données (Archive), on les utilise. Sinon, on prend le journal actuel.
+            const list = (Array.isArray(customData)) ? customData : visibleTransactions.value;
+
+            doc.autoTable({ 
+                head: [["Date", "Réf", "Expéditeur", "Destinataire", "Mode", "Montant"]], 
+                body: list.map(tx => [
+                    formatDate(tx.timestamp)+'\n'+formatTime(tx.timestamp), 
+                    tx.reference||'-', 
+                    tx.label+(tx.isHidden?' (INT)':''), 
+                    tx.recipient||'', 
+                    getModeAbbr(tx.category), 
+                    formatMoney(tx.amount-(tx.fees||0)).replace(/\s/g,' ')
+                ]), 
+                startY: 30, 
+                theme: 'grid', 
+                styles: {fontSize:8}, 
+                columnStyles: {0:{cellWidth:20}, 4:{cellWidth:15, halign:'center'}, 5:{halign:'right', fontStyle:'bold'}} 
+            });
+            
+            doc.save(title + ".pdf");
         };
 
         const formatMoney = (m) => new Intl.NumberFormat('fr-FR').format(m || 0) + ' F';
@@ -910,7 +1012,7 @@ createApp({
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory,
-            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers,
+            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, 
             saveSalaryFund, deleteSalaryFund, salaryStats, showEditTransactionModal, editingTx, openEditTransaction, saveEditedTransaction, selectClientForEdit
         };
