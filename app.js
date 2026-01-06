@@ -82,6 +82,8 @@ createApp({
         const newFund = ref({ amount: '', note: '' });
         // PARAMETRE GLOBAL TONTINE
         const globalTontineAmount = ref(10000); // Valeur par défaut
+        const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7)); // Par défaut : Mois actuel (ex: "2025-01")
+        const selectedPaieMonth = ref(new Date().toISOString().slice(0, 7)); // Mois par défaut = Mois actuel
         
         const saveGlobalTontine = async () => {
             if(!isAdmin.value) return;
@@ -152,11 +154,22 @@ createApp({
 
         // CALCULS PAIE (INTELLIGENT)
         const calculateBase = (emp) => {
+            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
+
             if (paiePeriod.value === '15') return Math.round(emp.salary / 2);
+
             if (paiePeriod.value === '30') {
-                const currentMonth = new Date().toISOString().slice(0, 7);
-                const hasTakenAdvance = salaryHistory.value.some(p => p.employeeId === emp.id && p.month === currentMonth && p.type === 'Acompte (15)');
-                return hasTakenAdvance ? Math.round(emp.salary / 2) : emp.salary;
+                const advancePayment = salaryHistory.value.find(p => 
+                    p.employeeId === emp.id && 
+                    p.month === currentMonth && 
+                    p.type.includes('Acompte')
+                );
+
+                if (advancePayment) {
+                    const totalAdvance = (advancePayment.net || 0) + (advancePayment.loan || 0) + (advancePayment.tontine || 0);
+                    return emp.salary - totalAdvance;
+                }
+                return emp.salary;
             }
             return 0;
         };
@@ -167,27 +180,41 @@ createApp({
         const calculateNet = (emp) => calculateBase(emp) - calculateLoanDeduc(emp) - calculateTontineDeduc(emp);
 
         const unpaidEmployees = computed(() => {
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            const currentTypeLabel = paiePeriod.value === '15' ? 'Acompte (15)' : 'Solde (Fin)';
-            return employeesList.value.filter(emp => !salaryHistory.value.some(pay => pay.employeeId === emp.id && pay.month === currentMonth && pay.type === currentTypeLabel));
+            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
+            const typeKey = paiePeriod.value === '15' ? 'Acompte' : 'Solde';
+            return employeesList.value.filter(emp => !salaryHistory.value.some(pay => pay.employeeId === emp.id && pay.month === currentMonth && pay.type.includes(typeKey)));
+        });
+        // TOTAUX DYNAMIQUES POUR LA SAISIE PAIE
+        const paieTotals = computed(() => {
+            let t = { base: 0, loan: 0, tontine: 0, net: 0 };
+            
+            // On boucle sur la liste affichée
+            unpaidEmployees.value.forEach(emp => {
+                t.base += calculateBase(emp);
+                t.loan += calculateLoanDeduc(emp);
+                t.tontine += calculateTontineDeduc(emp);
+                t.net += calculateNet(emp);
+            });
+            
+            return t;
         });
 
         // PAIEMENT
         const openPayModal = (emp) => {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
             const baseAmount = calculateBase(emp);
             const suggestedLoan = (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
             const tontineAmount = calculateTontineDeduc(emp);
 
             payForm.value = {
-                id: emp.id, name: emp.name, month: currentMonth,
+                id: emp.id, name: emp.name, month: currentMonth, // Le mois sélectionné est sauvegardé
                 base: baseAmount,
-                loan: suggestedLoan, maxLoan: emp.loan || 0, // Pour la limite manuelle
+                loan: suggestedLoan, maxLoan: emp.loan || 0,
                 tontine: tontineAmount,
                 net: baseAmount - suggestedLoan - tontineAmount
             };
             showPayModal.value = true;
-        };
+        };;
 
         const recalcNet = () => {
             if (payForm.value.loan > payForm.value.maxLoan) payForm.value.loan = payForm.value.maxLoan;
@@ -243,41 +270,43 @@ createApp({
         const closeMonthDetails = () => { selectedHistoryMonth.value = null; };
 
         // FONDS & BUDGET
+        // Remplacez l'ancienne fonction par celle-ci
         const saveSalaryFund = async () => {
             if(!newFund.value.amount) return;
-            try { await addDoc(collection(db, "salary_funds"), { amount: newFund.value.amount, note: newFund.value.note || 'Dotation', timestamp: Timestamp.now() }); showFundModal.value = false; newFund.value = { amount: '', note: '' }; alert("Fonds reçus !"); } catch(e) { alert(e.message); }
+            try { 
+                await addDoc(collection(db, "salary_funds"), { 
+                    amount: newFund.value.amount, 
+                    note: newFund.value.note || 'Dotation', 
+                    targetMonth: newFund.value.targetMonth || selectedBudgetMonth.value, // Le mois ciblé
+                    timestamp: Timestamp.now() 
+                }); 
+                showFundModal.value = false; 
+                newFund.value = { amount: '', note: '', targetMonth: selectedBudgetMonth.value }; // Reset
+                alert("Fonds enregistrés !"); 
+            } catch(e) { alert(e.message); } 
         };
         const deleteSalaryFund = async (id) => { if(confirm("Supprimer ?")) await deleteDoc(doc(db, "salary_funds", id)); };
 
         // STATS DU MOIS EN COURS (Fix Demande)
+        // Remplacez l'ancien computed salaryStats par celui-ci
         const salaryStats = computed(() => {
-            const currentMonth = new Date().toISOString().slice(0, 7); // Format "2024-01"
+            const target = selectedBudgetMonth.value; // Le mois qu'on regarde (ex: "2025-01")
             
-            // Fonction helper pour lire la date peu importe le format (Firestore Timestamp ou Date JS)
-            const getMonthFromObj = (obj) => {
-                if (!obj.timestamp) return '';
-                // Si c'est un Timestamp Firestore (avec toDate)
-                if (typeof obj.timestamp.toDate === 'function') {
-                    return obj.timestamp.toDate().toISOString().slice(0, 7);
-                }
-                // Si c'est déjà une Date JS
-                if (obj.timestamp instanceof Date) {
-                    return obj.timestamp.toISOString().slice(0, 7);
-                }
-                // Si c'est une string ou autre (fallback)
-                return new Date(obj.timestamp).toISOString().slice(0, 7);
-            };
-
-            // On filtre les fonds pour le mois en cours
+            // 1. Total reçu POUR ce mois précis
             const totalReceived = salaryFunds.value
-                .filter(f => getMonthFromObj(f) === currentMonth)
+                .filter(f => {
+                    // Si le champ targetMonth existe, on l'utilise. Sinon (vieux fonds), on utilise la date de création.
+                    const fundMonth = f.targetMonth || (f.timestamp?.toDate ? f.timestamp.toDate().toISOString().slice(0, 7) : '');
+                    return fundMonth === target;
+                })
                 .reduce((acc, curr) => acc + (curr.amount || 0), 0);
                 
-            // On filtre les paiements pour le mois en cours (Ici on utilise directement le champ 'month' qui est déjà une string)
+            // 2. Total payé SUR ce mois précis
             const totalPaid = salaryHistory.value
-                .filter(p => p.month === currentMonth)
+                .filter(p => p.month === target)
                 .reduce((acc, curr) => acc + (curr.net || 0), 0);
-                
+            
+            // 3. Dette totale (reste global, pas lié au mois)
             const totalLoans = employeesList.value.reduce((acc, curr) => acc + (curr.loan || 0), 0);
             
             return { totalReceived, totalPaid, balance: totalReceived - totalPaid, totalLoans };
@@ -1007,13 +1036,13 @@ createApp({
              globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults,
             
             // EXPORTS SALAIRE
-            currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, 
+            currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, selectedPaieMonth,
             showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, showFundModal, activeQuickFilter, exportHistoryTablePDF,
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
-            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory,
+            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth,
             openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
-            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, 
+            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals,
             saveSalaryFund, deleteSalaryFund, salaryStats, showEditTransactionModal, editingTx, openEditTransaction, saveEditedTransaction, selectClientForEdit
         };
     }
