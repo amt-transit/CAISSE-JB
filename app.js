@@ -99,6 +99,7 @@ createApp({
         const tempStartAmounts = ref({}); // Pour stocker temporairement les modifs
 
         let unsubscribeTransactions = null;
+        let lastSessionId = null;
 
         // ---------------------------------------------------------
         // --- LOGIQUE SALAIRE ---
@@ -419,36 +420,43 @@ createApp({
                 // Dans onAuthStateChanged...
                 const q = query(collection(db, "sessions"), where("status", "==", "OPEN"));
                 
+                // Dans onAuthStateChanged...
                 onSnapshot(q, (snapshot) => {
-                    // 1. COUPER L'ANCIENNE ÉCOUTE (Arrête de charger les anciennes données)
-                    if (unsubscribeTransactions) { 
-                        unsubscribeTransactions(); 
-                        unsubscribeTransactions = null; 
-                    }
-                    
+                    // Nettoyage écouteur transactions
+                    if (unsubscribeTransactions) { unsubscribeTransactions(); unsubscribeTransactions = null; }
+
                     if (!snapshot.empty) {
-                        // Session trouvée
-                        const docData = snapshot.docs[0]; 
-                        currentSession.value = { id: docData.id, ...docData.data() }; 
-                        startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
-                        // --- AJOUTEZ CECI ICI : CHARGEMENT BILLETAGE ---
-                        if (docData.savedBilletage) {
-                            // Si on trouve une sauvegarde, on la remet
-                            billets.value = docData.savedBilletage;
-                        } else {
-                            // Sinon on remet à zéro (important pour une nouvelle session)
-                            billets.value = [ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ];
-                        }
+                        const docData = snapshot.docs[0].data();
+                        const currentSessionId = snapshot.docs[0].id; // On récupère l'ID
                         
-                        // 2. DÉMARRER LA NOUVELLE ÉCOUTE (Uniquement pour cette session)
-                        const qTx = query(collection(db, "transactions"), where("sessionId", "==", docData.id));
+                        currentSession.value = { id: currentSessionId, ...docData }; 
+                        startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
+                        
+                        // --- CORRECTION BILLETAGE (STOPPER LE RESET) ---
+                        // On ne charge les billets que si c'est une NOUVELLE session (ou un F5)
+                        if (currentSessionId !== lastSessionId) {
+                            if (docData.savedBilletage) {
+                                billets.value = docData.savedBilletage;
+                            } else {
+                                // Remise à zéro propre pour une nouvelle session
+                                billets.value = [ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ];
+                            }
+                            // On mémorise qu'on a chargé cette session
+                            lastSessionId = currentSessionId;
+                        }
+                        // Si l'ID est le même (donc on est juste en train de taper), ON NE TOUCHE PAS à billets.value
+                        // -----------------------------------------------
+
+                        // Charger les transactions...
+                        const qTx = query(collection(db, "transactions"), where("sessionId", "==", currentSessionId));
                         unsubscribeTransactions = onSnapshot(qTx, (txSnap) => { 
                             transactions.value = txSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })); 
                         });
                     } else { 
-                        // 3. PAS DE SESSION : ON VIDE TOUT (C'est ici que le nettoyage se fait)
+                        // Pas de session
                         currentSession.value = null; 
-                        transactions.value = []; // <--- FORCE LE VIDAGE DU TABLEAU
+                        transactions.value = []; 
+                        lastSessionId = null; // Reset pour la prochaine fois
                         loadLastClosedSession(); 
                     }
                 });
