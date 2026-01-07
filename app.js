@@ -80,6 +80,8 @@ createApp({
         const selectedEmployeeHistoryName = ref('');
         const payForm = ref({});
         const newFund = ref({ amount: '', note: '' });
+        const filterType = ref('ALL'); // 'ALL', 'CREDIT', 'DEBIT'
+        const filterMode = ref('ALL'); // 'ALL', 'ESPECE', 'OM', 'WAVE'
         // PARAMETRE GLOBAL TONTINE
         const globalTontineAmount = ref(10000); // Valeur par défaut
         const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7)); // Par défaut : Mois actuel (ex: "2025-01")
@@ -336,48 +338,57 @@ createApp({
         const totals = computed(() => {
             let t = { espece: 0, om: 0, wave: 0 };
             transactions.value.forEach(tx => {
-                const amount = tx.amount - (tx.fees || 0);
-                if (tx.category === 'ESPECE') { if (tx.type === 'CREDIT') t.espece += amount; else t.espece -= amount; }
-                else if (tx.category === 'OM') { if (tx.type === 'CREDIT') t.om += amount; else t.om -= amount; }
-                else if (tx.category === 'WAVE') { if (tx.type === 'CREDIT') t.wave += amount; else t.wave -= amount; }
+                // MODIFICATION ICI : Distinction selon le mode
+                let amountToCount = 0;
+
+                if (tx.category === 'OM') {
+                    // Pour OM : On prend le TOTAL GLOBAL (sans déduire les frais 1%)
+                    amountToCount = tx.amount; 
+                } else {
+                    // Pour les autres : On garde le Net (Montant - Frais)
+                    amountToCount = tx.amount - (tx.fees || 0);
+                }
+
+                if (tx.category === 'ESPECE') { if (tx.type === 'CREDIT') t.espece += amountToCount; else t.espece -= amountToCount; }
+                else if (tx.category === 'OM') { if (tx.type === 'CREDIT') t.om += amountToCount; else t.om -= amountToCount; }
+                else if (tx.category === 'WAVE') { if (tx.type === 'CREDIT') t.wave += amountToCount; else t.wave -= amountToCount; }
             });
-            if (currentSession.value) { t.espece += (currentSession.value.startAmount?.espece || 0); t.om += (currentSession.value.startAmount?.om || 0); t.wave += (currentSession.value.startAmount?.wave || 0); }
+            
+            // Ajout des fonds initiaux
+            if (currentSession.value) { 
+                t.espece += (currentSession.value.startAmount?.espece || 0); 
+                t.om += (currentSession.value.startAmount?.om || 0); 
+                t.wave += (currentSession.value.startAmount?.wave || 0); 
+            }
             return t;
         });
 
         const totalEspeceCompte = computed(() => billets.value.reduce((acc, b) => acc + (b.val * (b.count || 0)), 0));
 
         const visibleTransactions = computed(() => {
-            // 1. Filtrage de base (Admin ou pas)
             let filtered = transactions.value;
-            if (!isAdmin.value) {
-                filtered = filtered.filter(t => !t.isHidden);
+
+            // 1. Filtre Admin / Caché
+            if (!isAdmin.value) filtered = filtered.filter(t => !t.isHidden);
+
+            // 2. Filtres Rapides (Boutons existants)
+            if (activeQuickFilter.value === 'HIDDEN') filtered = filtered.filter(t => t.isHidden);
+            else if (activeQuickFilter.value === 'UNKNOWN') filtered = filtered.filter(t => t.isPendingIdentity);
+            else if (activeQuickFilter.value === 'BILL') filtered = filtered.filter(t => t.isBill);
+            else if (activeQuickFilter.value === 'RECOVERED') filtered = filtered.filter(t => t.wasRecovered);
+            else if (activeQuickFilter.value === 'ALL' && isAdmin.value && !showHiddenTransactions.value) filtered = filtered.filter(t => !t.isHidden);
+
+            // 3. NOUVEAU : Filtre par Type (Entrée / Sortie)
+            if (filterType.value !== 'ALL') {
+                filtered = filtered.filter(t => t.type === filterType.value);
             }
 
-            // 2. Application du Filtre Rapide (Quick Filter)
-            if (activeQuickFilter.value === 'HIDDEN') {
-                filtered = filtered.filter(t => t.isHidden);
-            } else if (activeQuickFilter.value === 'UNKNOWN') {
-                filtered = filtered.filter(t => t.isPendingIdentity);
-            } else if (activeQuickFilter.value === 'BILL') {
-                filtered = filtered.filter(t => t.isBill);
-            } else if (activeQuickFilter.value === 'RECOVERED') {
-                filtered = filtered.filter(t => t.wasRecovered);
-            } else if (activeQuickFilter.value === 'ALL') {
-                if (isAdmin.value && !showHiddenTransactions.value) {
-                     filtered = filtered.filter(t => !t.isHidden);
-                }
+            // 4. NOUVEAU : Filtre par Mode (Espèce / OM / Wave)
+            if (filterMode.value !== 'ALL') {
+                filtered = filtered.filter(t => t.category === filterMode.value);
             }
 
-            // 3. Tri par date
-            return filtered.sort((a, b) => {
-                const orderMap = { 'ESPECE': 1, 'WAVE': 2, 'OM': 3, 'BANQUE': 4 };
-                const oA = orderMap[a.category] || 99, oB = orderMap[b.category] || 99;
-                if (oA !== oB) return oA - oB;
-                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
-                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
-                return timeB - timeA; 
-            });
+            return filtered.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
         });
 
         const historyModalTotals = computed(() => {
@@ -1072,7 +1083,7 @@ createApp({
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
             saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, triggerSmartFilter,
-             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal,
+             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal, filterType, filterMode,
             
             // EXPORTS SALAIRE
             currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, selectedPaieMonth,
