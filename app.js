@@ -431,6 +431,14 @@ createApp({
                         const docData = snapshot.docs[0]; 
                         currentSession.value = { id: docData.id, ...docData.data() }; 
                         startAmounts.value = currentSession.value.startAmount || { espece:0, om:0, wave:0 };
+                        // --- AJOUTEZ CECI ICI : CHARGEMENT BILLETAGE ---
+                        if (docData.savedBilletage) {
+                            // Si on trouve une sauvegarde, on la remet
+                            billets.value = docData.savedBilletage;
+                        } else {
+                            // Sinon on remet à zéro (important pour une nouvelle session)
+                            billets.value = [ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ];
+                        }
                         
                         // 2. DÉMARRER LA NOUVELLE ÉCOUTE (Uniquement pour cette session)
                         const qTx = query(collection(db, "transactions"), where("sessionId", "==", docData.id));
@@ -1023,7 +1031,30 @@ createApp({
         const getModeAbbr = (c) => ({ 'ESPECE': 'ESP', 'OM': 'OM', 'WAVE': 'WAV', 'BANQUE': 'BQE' }[c] || c);
         const getGapClass = (gap) => gap === 0 ? 'text-gray-400' : (gap > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
         const formatGap = (g) => (g > 0 ? '+' : '') + formatMoney(g);
-        const saveBilletage = () => {}; 
+        // SAUVEGARDE AUTOMATIQUE DU BILLETAGE
+        const saveBilletage = async () => {
+            if (!currentSession.value) return;
+            try {
+                // On met à jour le document de la session actuelle avec les billets
+                await updateDoc(doc(db, "sessions", currentSession.value.id), { 
+                    savedBilletage: billets.value 
+                });
+            } catch (e) { 
+                console.error("Erreur sauvegarde billetage", e); 
+            }
+        }; 
+        // --- NOUVEAU : Fonction de calcul du "Net à Vider" ---
+        const calculateNetGlobal = (t) => {
+            if (!t) return 0;
+            const om = t.om || 0;
+            const wave = t.wave || 0;
+            const esp = t.espece || 0;
+            
+            // Formule demandée : (OM / 1.01) + Wave + Espèce
+            const omNet = om / 1.01;
+            
+            return Math.round(omNet + wave + esp);
+        };
 
         return {
             user, isAdmin, authLoading, loginForm, login, logout, loginError,
@@ -1033,7 +1064,7 @@ createApp({
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
             saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, triggerSmartFilter,
-             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults,
+             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal,
             
             // EXPORTS SALAIRE
             currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, selectedPaieMonth,

@@ -66,7 +66,7 @@
                 </div>
 
                 <div v-else-if="currentSession">
-                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-2 mb-2">
+                    <div class="grid grid-cols-1 lg:grid-cols-5 gap-2 mb-2">
                         <div class="flex justify-between items-center mb-2 bg-indigo-50 p-2 rounded border border-indigo-100">
                             <div class="text-xs text-indigo-800">
                                 <span class="font-bold">Session ouverte par :</span> {{ currentSession.openedBy }}
@@ -75,6 +75,17 @@
                             <button v-if="isAdmin" @click="openEditStartAmounts" class="bg-white border border-orange-300 text-orange-600 px-2 py-1 rounded text-xs font-bold hover:bg-orange-50 shadow-sm">
                                 <i class="fa-solid fa-pen-to-square mr-1"></i> Corriger Fonds Initial
                             </button>
+                        </div>
+                        <div class="bg-indigo-900 text-white p-2 rounded shadow border-l-4 border-indigo-500 flex flex-col justify-center">
+                            <div class="flex justify-between items-end">
+                                <div>
+                                    <p class="text-[10px] font-bold text-indigo-300 uppercase">Net Global (Réel)</p>
+                                    <p class="text-[9px] text-indigo-400 italic">OM/1.01 + Wave + Esp</p>
+                                </div>
+                                <p class="text-xl font-bold font-mono leading-none">
+                                    {{ formatMoney(calculateNetGlobal(currentSession ? totals : null)) }}
+                                </p>
+                            </div>
                         </div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-orange-500 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">OM</p><p class="text-lg font-bold text-orange-600 font-mono leading-none">{{ formatMoney(totals.om) }}</p></div></div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-blue-400 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">Wave</p><p class="text-lg font-bold text-blue-500 font-mono leading-none">{{ formatMoney(totals.wave) }}</p></div></div>
@@ -266,7 +277,7 @@
 
                 <div v-else class="overflow-x-auto">
                     <table class="w-full text-left table-compact">
-                        <thead><tr><th>Date Fermeture</th><th class="text-right">Entrées</th><th class="text-right">Sorties</th><th class="text-right">Espèce</th><th class="text-right">OM</th><th class="text-right">Wave</th><th class="text-center">Action</th></tr></thead>
+                        <thead><tr><th>Date Fermeture</th><th class="text-right">Entrées</th><th class="text-right">Sorties</th><th class="text-right">Espèce</th><th class="text-right">OM</th><th class="text-right">Wave</th><th class="text-right bg-indigo-50 text-indigo-900 border-l border-indigo-200">Net Global</th><th class="text-center">Action</th></tr></thead>
                         <tbody>
                             <tr v-for="sess in filteredHistory" :key="sess.id" class="hover:bg-gray-50">
                                 <td class="font-bold text-gray-600">{{ formatDateTime(sess.endTime) }}</td>
@@ -275,6 +286,9 @@
                                 <td class="text-right font-bold text-gray-800">{{ formatMoney(sess.totalsComputed?.espece) }}</td>
                                 <td class="text-right">{{ formatMoney(sess.totalsComputed?.om) }}</td>
                                 <td class="text-right">{{ formatMoney(sess.totalsComputed?.wave) }}</td>
+                                <td class="text-right font-bold font-mono text-indigo-900 bg-indigo-50 border-l border-indigo-100">
+                                    {{ formatMoney(calculateNetGlobal(sess.totalsComputed)) }}
+                                </td>
                                 <td class="text-center"><button @click="openHistoryDetails(sess)" class="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold hover:bg-indigo-200 transition">Voir</button></td>
                             </tr>
                         </tbody>
