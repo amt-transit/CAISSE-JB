@@ -83,14 +83,76 @@
                                     <p class="text-[9px] text-indigo-400 italic">OM/1.01 + Wave + Esp</p>
                                 </div>
                                 <p class="text-xl font-bold font-mono leading-none">
-                                    {{ formatMoney(calculateNetGlobal(currentSession ? totals : null)) }}
+                                    {{ formatMoney(realGlobalTotal) }}
                                 </p>
                             </div>
                         </div>
-                        <div class="bg-white p-2 rounded shadow border-l-4 border-orange-500 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">OM</p><p class="text-lg font-bold text-orange-600 font-mono leading-none">{{ formatMoney(totals.om) }}</p></div></div>
-                        <div class="bg-white p-2 rounded shadow border-l-4 border-blue-400 flex justify-between items-center"><div><p class="text-[10px] font-bold text-gray-400 uppercase">Wave</p><p class="text-lg font-bold text-blue-500 font-mono leading-none">{{ formatMoney(totals.wave) }}</p></div></div>
+                        <div class="bg-white p-2 rounded shadow border-l-4 border-orange-500 flex flex-col justify-between h-24">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[10px] text-gray-500 font-bold uppercase">OM (Théorique)</p>
+                                    <p class="text-xl font-bold text-orange-600 font-mono leading-none mt-1">
+                                        {{ formatMoney(totals.om) }}
+                                    </p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-[10px] px-1 rounded font-bold" 
+                                        :class="(totals.om - (currentSession.startAmount?.om||0)) >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+                                        {{ (totals.om - (currentSession.startAmount?.om||0)) >= 0 ? '+' : '' }}
+                                        {{ formatMoney(totals.om - (currentSession.startAmount?.om||0)) }}
+                                    </span>
+                                    <p class="text-[8px] text-gray-400 mt-1">Activité Journal</p>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-auto border-t border-gray-100 pt-1 flex justify-between items-center">
+                                <span class="text-[9px] text-gray-400">Fond Initial :</span>
+                                <span class="text-[10px] font-bold text-gray-600">{{ formatMoney(currentSession.startAmount?.om || 0) }}</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-white p-2 rounded shadow border-l-4 border-blue-500 flex flex-col justify-between h-24">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[10px] text-gray-500 font-bold uppercase">Wave (Théorique)</p>
+                                    <p class="text-xl font-bold text-blue-600 font-mono leading-none mt-1">
+                                        {{ formatMoney(totals.wave) }}
+                                    </p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-[10px] px-1 rounded font-bold" 
+                                        :class="(totals.wave - (currentSession.startAmount?.wave||0)) >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+                                        {{ (totals.wave - (currentSession.startAmount?.wave||0)) >= 0 ? '+' : '' }}
+                                        {{ formatMoney(totals.wave - (currentSession.startAmount?.wave||0)) }}
+                                    </span>
+                                    <p class="text-[8px] text-gray-400 mt-1">Activité Journal</p>
+                                </div>
+                            </div>
+
+                            <div class="mt-auto border-t border-gray-100 pt-1 flex justify-between items-center">
+                                <span class="text-[9px] text-gray-400">Fond Initial :</span>
+                                <span class="text-[10px] font-bold text-gray-600">{{ formatMoney(currentSession.startAmount?.wave || 0) }}</span>
+                            </div>
+                        </div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-green-500"><div class="flex justify-between text-xs mb-1"><span class="text-gray-500">Théo:</span><span class="font-bold">{{ formatMoney(totals.espece) }}</span></div><div class="flex justify-between text-xs"><span class="text-gray-500">Réel:</span><span class="font-bold text-blue-600">{{ formatMoney(totalEspeceCompte) }}</span></div></div>
-                        <div class="p-2 rounded shadow text-center flex flex-col justify-center" :class="getGapClass(totalEspeceCompte - totals.espece)"><div class="text-[10px] uppercase font-bold opacity-70">Écart</div><div class="text-lg font-bold font-mono leading-none">{{ (totalEspeceCompte - totals.espece) > 0 ? '+' : '' }}{{ formatMoney(totalEspeceCompte - totals.espece) }}</div></div>
+                        <div v-if="isAdmin" class="p-4 rounded-xl shadow-lg border text-center transition-all duration-500 relative overflow-hidden group"
+                            :class="(totalEspeceCompte - totals.espece) === 0 ? 'bg-green-100 border-green-300 text-green-800' : 'bg-red-50 border-red-200 text-red-700'">
+                            
+                            <div class="font-bold text-xs uppercase tracking-widest mb-1 opacity-70">Écart Espèce Physique</div>
+                            <div class="text-3xl font-black font-mono tracking-tighter transform group-hover:scale-110 transition-transform duration-300">
+                                {{ formatGap(totalEspeceCompte - totals.espece) }}
+                            </div>
+                            
+                            <div v-if="(totalEspeceCompte - totals.espece) !== 0" class="mt-2 text-[10px] border-t border-red-200 pt-2">
+                                <div v-if="globalGap === 0" class="flex items-center justify-center gap-1 text-blue-600 font-bold bg-blue-50 py-1 rounded">
+                                    <i class="fa-solid fa-check-double"></i>
+                                    <span>Argent non perdu (Erreur de saisie OM/ESP)</span>
+                                </div>
+                                <div v-else class="text-red-500 font-bold">
+                                    Manque réel Global : {{ formatGap(globalGap) }}
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex flex-col lg:flex-row gap-2 h-[calc(100vh-180px)]">
@@ -166,23 +228,7 @@
                                         <i class="fa-solid fa-eye-slash"></i> Cachés
                                     </button>
                                 </div>
-                                <div v-if="isAdmin" class="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
-                                    </div>
-
-                                <div class="flex gap-2 mt-1 border-t pt-2 border-gray-200">
-                                    <select v-model="filterType" class="bg-white border border-gray-300 text-gray-700 text-[10px] rounded px-2 py-1 font-bold focus:outline-none focus:border-indigo-500">
-                                        <option value="ALL">Tout Type</option>
-                                        <option value="CREDIT">Entrées (Vert)</option>
-                                        <option value="DEBIT">Sorties (Rouge)</option>
-                                    </select>
-
-                                    <select v-model="filterMode" class="bg-white border border-gray-300 text-gray-700 text-[10px] rounded px-2 py-1 font-bold focus:outline-none focus:border-indigo-500">
-                                        <option value="ALL">Tout Compte</option>
-                                        <option value="ESPECE">Espèce</option>
-                                        <option value="OM">Orange Money</option>
-                                        <option value="WAVE">Wave</option>
-                                    </select>
-                                </div>
+                                
                             </div>
                             <div class="flex-grow overflow-auto">
                                 <table class="w-full text-left border-collapse table-compact">
@@ -211,6 +257,7 @@
                                             <td class="text-right font-mono text-[10px]"><div v-if="tx.expectedPrice && tx.expectedPrice > 0"><span v-if="(tx.amount - tx.expectedPrice) < 0" class="text-red-600 font-bold">{{ formatMoney(tx.amount - tx.expectedPrice) }}</span><span v-else-if="(tx.amount - tx.expectedPrice) > 0" class="text-green-600">+{{ formatMoney(tx.amount - tx.expectedPrice) }}</span><span v-else class="text-green-400"><i class="fa-solid fa-check"></i></span></div></td>
                                             <td v-if="isAdmin" class="text-right p-0">
                                                 <button @click="openEditTransaction(tx)" class="text-gray-300 hover:text-orange-500 px-1 py-1 transition" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+                                                <button @click="duplicateTransaction(tx)" class="text-gray-300 hover:text-blue-500 px-1 py-1" title="Dupliquer (Même Réf)"><i class="fa-solid fa-copy"></i></button>
                                                 <button @click="deleteTransaction(tx)" class="text-gray-300 hover:text-red-500 px-1 py-1 transition" title="Supprimer"><i class="fa-solid fa-times"></i></button>
                                             </td>
                                         </tr>

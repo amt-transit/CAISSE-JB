@@ -364,6 +364,19 @@ createApp({
         });
 
         const totalEspeceCompte = computed(() => billets.value.reduce((acc, b) => acc + (b.val * (b.count || 0)), 0));
+        // NOUVEAU CALCUL : Net Global basé sur le RÉEL (Billetage)
+        const realGlobalTotal = computed(() => {
+            // 1. OM : On prend le Brut / 1.01 (Valeur nette estimée)
+            const omNet = (totals.value.om || 0) / 1.01;
+            
+            // 2. Wave : On prend le Brut (Valeur nette égale)
+            const wave = totals.value.wave || 0;
+            
+            // 3. Espèce : ON PREND LE RÉEL (Ce que vous avez compté dans le billetage)
+            const especeReelle = totalEspeceCompte.value || 0;
+            
+            return Math.round(omNet + wave + especeReelle);
+        });
 
         const visibleTransactions = computed(() => {
             let filtered = transactions.value;
@@ -906,6 +919,30 @@ createApp({
                 await deleteDoc(doc(db, "transactions", tx.id));
             } catch (e) { alert("Erreur suppression : " + e.message); }
         };
+        // FONCTION POUR DUPLIQUER UNE OPÉRATION (Gestion des cumuls)
+        const duplicateTransaction = (tx) => {
+            // 1. On remplit le formulaire avec les données de la ligne copiée
+            const d = tx.timestamp.toDate();
+            form.value = {
+                type: tx.type,
+                category: tx.category,
+                amount: '', // On vide le montant (car souvent différent)
+                label: '', // On vide le nom (car c'est un autre client)
+                recipient: tx.recipient,
+                reference: tx.reference, // ON GARDE LA MÊME RÉFÉRENCE
+                date: d.toISOString().split('T')[0],
+                expectedPrice: 0,
+                isHidden: tx.isHidden,
+                isBill: tx.isBill,
+                isPendingIdentity: false
+            };
+            
+            // 2. On scroll vers le formulaire (pour mobile)
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            
+            // 3. Petit message visuel
+            alert("Données copiées ! Saisissez le nouveau Client et Montant.");
+        };
         
         const openClosingModal = () => { closing.value.om = 0; closing.value.wave = 0; showClosingModal.value = true; };
         
@@ -1074,9 +1111,22 @@ createApp({
             
             return Math.round(omNet + wave + esp);
         };
+        // CALCUL DE L'ÉCART GLOBAL (Mise à jour : Logique Net)
+        const globalGap = computed(() => {
+            // 1. Richesse Théorique (Ce que le logiciel dit)
+            // On applique la même logique de frais : OM/1.01 + Wave + Espèce Théorique
+            const theoNetOM = (totals.value.om || 0) / 1.01;
+            const theoTotal = Math.round(theoNetOM + (totals.value.wave || 0) + (totals.value.espece || 0));
+            
+            // 2. Richesse Réelle (Ce que vous avez vraiment : OM Net + Wave + Billets comptés)
+            // On utilise la variable qu'on vient de créer pour la carte violette
+            const realTotal = realGlobalTotal.value;
+            
+            return realTotal - theoTotal;
+        });
 
         return {
-            user, isAdmin, authLoading, loginForm, login, logout, loginError,
+            user, isAdmin, authLoading, loginForm, login, logout, loginError, duplicateTransaction, globalGap, realGlobalTotal,
             currentView, currentSession, transactions, visibleTransactions, loading, startAmounts, form, closing, billets, totals, totalEspeceCompte, showClosingModal,
             closedSessions, showHistoryModal, selectedSessionHistory, selectedTransactionsHistory, visibleHistoryTransactions, openHistoryDetails,
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
