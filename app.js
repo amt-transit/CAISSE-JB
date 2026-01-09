@@ -43,6 +43,9 @@ createApp({
         const showClosingModal = ref(false);
         const billets = ref([ {val:10000, count:''}, {val:5000, count:''}, {val:2000, count:''}, {val:1000, count:''}, {val:500, count:''}, {val:200, count:''}, {val:100, count:''}, {val:50, count:''} ]);
         const showHiddenTransactions = ref(true);
+        // AJOUTER CES DEUX LIGNES (Pour stocker la saisie OM/Wave)
+        const realOmInput = ref(null);
+        const realWaveInput = ref(null);
 
         // --- DONNEES HISTORIQUE CAISSE ---
         const closedSessions = ref([]);
@@ -345,8 +348,11 @@ createApp({
                 if (tx.category === 'OM') {
                     // Pour OM : On prend le TOTAL GLOBAL (sans déduire les frais 1%)
                     amountToCount = tx.amount; 
+                } else if (tx.category === 'ESPECE') {
+                    // Pour Espèce : On prend le montant BRUT (pas de frais sur le cash physique)
+                    amountToCount = tx.amount;
                 } else {
-                    // Pour les autres : On garde le Net (Montant - Frais)
+                    // Pour Wave : On garde le Net (Montant - Frais)
                     amountToCount = tx.amount - (tx.fees || 0);
                 }
 
@@ -365,18 +371,30 @@ createApp({
         });
 
         const totalEspeceCompte = computed(() => billets.value.reduce((acc, b) => acc + (b.val * (b.count || 0)), 0));
+        
+        // --- NOUVEAU : Fonction de calcul du "Net à Vider" ---
+        // C'est ici qu'on définit la formule mathématique pour tout le monde (OM/1.01 etc.)
+        const calculateNetGlobal = (t) => {
+            if (!t) return 0;
+            const om = t.om || 0;
+            const wave = t.wave || 0;
+            const esp = t.espece || 0;
+            
+            // Formule demandée : (OM / 1.01) + Wave + Espèce
+            const omNet = om / 1.01;
+            return Math.round(omNet + wave + esp);
+        };
+
         // NOUVEAU CALCUL : Net Global basé sur le RÉEL (Billetage)
         const realGlobalTotal = computed(() => {
-            // 1. OM : On prend le Brut / 1.01 (Valeur nette estimée)
-            const omNet = (totals.value.om || 0) / 1.01;
-            
-            // 2. Wave : On prend le Brut (Valeur nette égale)
-            const wave = totals.value.wave || 0;
-            
-            // 3. Espèce : ON PREND LE RÉEL (Ce que vous avez compté dans le billetage)
-            const especeReelle = totalEspeceCompte.value || 0;
-            
-            return Math.round(omNet + wave + especeReelle);
+            // On utilise la formule centrale avec les valeurs réelles
+            // OM et Wave : On prend les totaux calculés (supposés réels car pas de champ de saisie sur le dashboard)
+            // Espèce : On prend le Billetage (Réel compté)
+            return calculateNetGlobal({
+                om: totals.value.om,
+                wave: totals.value.wave,
+                espece: totalEspeceCompte.value
+            });
         });
 
         const visibleTransactions = computed(() => {
@@ -808,10 +826,7 @@ createApp({
         // 2. La fonction pour OUVRIR la fenêtre
         const openEditStartAmounts = () => {
             console.log("1. Clic détecté");
-            
             if (currentSession.value) {
-                console.log("2. Session trouvée :", currentSession.value.id);
-                
                 tempStartAmounts.value = { 
                     espece: currentSession.value.startAmount?.espece || 0,
                     om: currentSession.value.startAmount?.om || 0,
@@ -819,7 +834,6 @@ createApp({
                 };
                 
                 showEditStartAmountModal.value = true;
-                console.log("3. Variable showEditStartAmountModal mise à TRUE");
             } else {
                 console.error("ERREUR : Aucune session active détectée (currentSession est null)");
                 alert("Erreur : Impossible de trouver la session active.");
@@ -1108,6 +1122,7 @@ createApp({
         const getModeAbbr = (c) => ({ 'ESPECE': 'ESP', 'OM': 'OM', 'WAVE': 'WAV', 'BANQUE': 'BQE' }[c] || c);
         const getGapClass = (gap) => gap === 0 ? 'text-gray-400' : (gap > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
         const formatGap = (g) => (g > 0 ? '+' : '') + formatMoney(g);
+
         // SAUVEGARDE AUTOMATIQUE DU BILLETAGE
         const saveBilletage = async () => {
             if (!currentSession.value) return;
@@ -1120,30 +1135,50 @@ createApp({
                 console.error("Erreur sauvegarde billetage", e); 
             }
         }; 
-        // --- NOUVEAU : Fonction de calcul du "Net à Vider" ---
-        const calculateNetGlobal = (t) => {
-            if (!t) return 0;
-            const om = t.om || 0;
-            const wave = t.wave || 0;
-            const esp = t.espece || 0;
-            
-            // Formule demandée : (OM / 1.01) + Wave + Espèce
-            const omNet = om / 1.01;
-            
-            return Math.round(omNet + wave + esp);
-        };
-        // CALCUL DE L'ÉCART GLOBAL (Mise à jour : Logique Net)
+
+        // NOUVELLE FORMULE SÉCURISÉE (Empêche l'affichage vide)
         const globalGap = computed(() => {
-            // 1. Richesse Théorique (Ce que le logiciel dit)
-            // On applique la même logique de frais : OM/1.01 + Wave + Espèce Théorique
-            const theoNetOM = (totals.value.om || 0) / 1.01;
-            const theoTotal = Math.round(theoNetOM + (totals.value.wave || 0) + (totals.value.espece || 0));
+            if (!currentSession.value) return 0;
+
+            // Petite fonction pour éviter les erreurs (Convertit tout en Nombre ou 0)
+            const safeNum = (val) => {
+                if (val === null || val === undefined || val === '') return 0;
+                const n = parseFloat(val);
+                return isNaN(n) ? 0 : n;
+            };
+
+            // --- A. RICHESSE RÉELLE ---
+            const realCash = safeNum(totalEspeceCompte.value);
             
-            // 2. Richesse Réelle (Ce que vous avez vraiment : OM Net + Wave + Billets comptés)
-            // On utilise la variable qu'on vient de créer pour la carte violette
-            const realTotal = realGlobalTotal.value;
+            // OM : Saisie manuelle OU Théorique
+            const realOM = (realOmInput.value !== null && realOmInput.value !== '') 
+                           ? safeNum(realOmInput.value) 
+                           : safeNum(totals.value.om);
+
+            // Wave : Saisie manuelle OU Théorique
+            const realWave = (realWaveInput.value !== null && realWaveInput.value !== '') 
+                             ? safeNum(realWaveInput.value) 
+                             : safeNum(totals.value.wave);
             
-            return realTotal - theoTotal;
+            const richesseReelle = realCash + realOM + realWave;
+
+            // --- B. FONDS INITIAUX ---
+            const startEsp = safeNum(currentSession.value.startAmount?.espece);
+            const startOm = safeNum(currentSession.value.startAmount?.om);
+            const startWave = safeNum(currentSession.value.startAmount?.wave);
+            
+            const fondsInitiaux = startEsp + startOm + startWave;
+
+            // --- C. FLUX ---
+            const totalEspTheo = safeNum(totals.value.espece);
+            const totalOmTheo = safeNum(totals.value.om);
+            const totalWaveTheo = safeNum(totals.value.wave);
+            
+            const theoTotal = totalEspTheo + totalOmTheo + totalWaveTheo;
+            const fluxActivite = theoTotal - fondsInitiaux;
+
+            // --- RÉSULTAT ---
+            return Math.round(richesseReelle - fondsInitiaux - fluxActivite);
         });
 
         return {
@@ -1154,7 +1189,7 @@ createApp({
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
             formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
             saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, triggerSmartFilter,
-             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal, filterType, filterMode,
+             globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal, filterType, filterMode, realOmInput, realWaveInput,
             
             // EXPORTS SALAIRE
             currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, selectedPaieMonth,

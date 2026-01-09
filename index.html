@@ -136,21 +136,25 @@
                         </div>
                         <div class="bg-white p-2 rounded shadow border-l-4 border-green-500"><div class="flex justify-between text-xs mb-1"><span class="text-gray-500">Théo:</span><span class="font-bold">{{ formatMoney(totals.espece) }}</span></div><div class="flex justify-between text-xs"><span class="text-gray-500">Réel:</span><span class="font-bold text-blue-600">{{ formatMoney(totalEspeceCompte) }}</span></div></div>
                         <div v-if="isAdmin" class="p-4 rounded-xl shadow-lg border text-center transition-all duration-500 relative overflow-hidden group"
-                            :class="(totalEspeceCompte - totals.espece) === 0 ? 'bg-green-100 border-green-300 text-green-800' : 'bg-red-50 border-red-200 text-red-700'">
+                            :class="globalGap === 0 ? 'bg-green-100 border-green-300 text-green-800' : 'bg-red-50 border-red-200 text-red-700'">
                             
-                            <div class="font-bold text-xs uppercase tracking-widest mb-1 opacity-70">Écart Espèce Physique</div>
-                            <div class="text-3xl font-black font-mono tracking-tighter transform group-hover:scale-110 transition-transform duration-300">
-                                {{ formatGap(totalEspeceCompte - totals.espece) }}
+                            <div class="font-bold text-xs uppercase tracking-widest mb-1 opacity-70">
+                                {{ globalGap === 0 ? 'Balance Parfaite' : 'Écart Balance' }}
                             </div>
                             
-                            <div v-if="(totalEspeceCompte - totals.espece) !== 0" class="mt-2 text-[10px] border-t border-red-200 pt-2">
-                                <div v-if="globalGap === 0" class="flex items-center justify-center gap-1 text-blue-600 font-bold bg-blue-50 py-1 rounded">
-                                    <i class="fa-solid fa-check-double"></i>
-                                    <span>Argent non perdu (Erreur de saisie OM/ESP)</span>
+                            <div class="text-3xl font-black font-mono tracking-tighter transform group-hover:scale-110 transition-transform duration-300">
+                                {{ formatGap(globalGap) }}
+                            </div>
+                            
+                            <div class="mt-2 text-[9px] border-t pt-2 opacity-80" :class="globalGap === 0 ? 'border-green-200' : 'border-red-200'">
+                                <div class="flex justify-between px-4">
+                                    <span>Réel</span>
+                                    <span>- (Initial + Flux)</span>
                                 </div>
-                                <div v-else class="text-red-500 font-bold">
-                                    Manque réel Global : {{ formatGap(globalGap) }}
-                                </div>
+                            </div>
+
+                            <div v-if="globalGap === 0 && (totalEspeceCompte - totals.espece) !== 0" class="absolute top-0 right-0 bg-blue-500 text-white text-[8px] px-2 py-1 rounded-bl font-bold">
+                                Compensation OK
                             </div>
                         </div>
                     </div>
