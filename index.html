@@ -228,6 +228,20 @@
                                         <i class="fa-solid fa-eye-slash"></i> Cachés
                                     </button>
                                 </div>
+                                <div class="flex gap-2 mt-1 border-t pt-2 border-gray-200">
+                                    <select v-model="filterType" class="bg-white border border-gray-300 text-gray-700 text-[10px] rounded px-2 py-1 font-bold focus:outline-none focus:border-indigo-500">
+                                        <option value="ALL">Tout Type</option>
+                                        <option value="CREDIT">Entrées (Vert)</option>
+                                        <option value="DEBIT">Sorties (Rouge)</option>
+                                    </select>
+
+                                    <select v-model="filterMode" class="bg-white border border-gray-300 text-gray-700 text-[10px] rounded px-2 py-1 font-bold focus:outline-none focus:border-indigo-500">
+                                        <option value="ALL">Tout Compte</option>
+                                        <option value="ESPECE">Espèce</option>
+                                        <option value="OM">Orange Money</option>
+                                        <option value="WAVE">Wave</option>
+                                    </select>
+                                </div>
                                 
                             </div>
                             <div class="flex-grow overflow-auto">
