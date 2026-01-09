@@ -97,8 +97,9 @@ createApp({
         };
         
         const selectedHistoryMonth = ref(null); // Pour l'historique groupé
-        const showEditStartAmountModal = ref(false); // Pour le modal de modification
-        const tempStartAmounts = ref({}); // Pour stocker temporairement les modifs
+        // 1. Les variables
+        const showEditStartAmountModal = ref(false);
+        const tempStartAmounts = ref({ espece: 0, om: 0, wave: 0 });
 
         let unsubscribeTransactions = null;
         let lastSessionId = null;
@@ -804,30 +805,50 @@ createApp({
                 }
             } catch (e) { console.log("Pas de session précédente trouvée ou erreur", e); }
         };
-        // Ouvre le modal de modification
+        // 2. La fonction pour OUVRIR la fenêtre
         const openEditStartAmounts = () => {
-            // On copie les valeurs actuelles
-            tempStartAmounts.value = { ...startAmounts.value }; 
-            showEditStartAmountModal.value = true;
+            console.log("1. Clic détecté");
+            
+            if (currentSession.value) {
+                console.log("2. Session trouvée :", currentSession.value.id);
+                
+                tempStartAmounts.value = { 
+                    espece: currentSession.value.startAmount?.espece || 0,
+                    om: currentSession.value.startAmount?.om || 0,
+                    wave: currentSession.value.startAmount?.wave || 0
+                };
+                
+                showEditStartAmountModal.value = true;
+                console.log("3. Variable showEditStartAmountModal mise à TRUE");
+            } else {
+                console.error("ERREUR : Aucune session active détectée (currentSession est null)");
+                alert("Erreur : Impossible de trouver la session active.");
+            }
         };
 
-        // Sauvegarde la modification dans Firebase
+        // 3. La fonction pour ENREGISTRER les modifications
         const saveEditedStartAmounts = async () => {
             if (!currentSession.value) return;
             try {
-                // Mise à jour de la session en base
+                // Mise à jour dans Firebase
                 await updateDoc(doc(db, "sessions", currentSession.value.id), {
-                    startAmount: tempStartAmounts.value
+                    startAmount: {
+                        espece: tempStartAmounts.value.espece,
+                        om: tempStartAmounts.value.om,
+                        wave: tempStartAmounts.value.wave
+                    }
                 });
                 
-                // Mise à jour locale immédiate
-                startAmounts.value = { ...tempStartAmounts.value };
-                // Mise à jour de l'objet session local
+                // Mise à jour locale immédiate (pour que les cartes changent tout de suite)
                 currentSession.value.startAmount = { ...tempStartAmounts.value };
+                startAmounts.value = { ...tempStartAmounts.value }; 
                 
                 showEditStartAmountModal.value = false;
-                alert("Fonds de caisse mis à jour !");
-            } catch (e) { alert("Erreur : " + e.message); }
+                alert("Fonds initiaux corrigés avec succès !");
+            } catch (e) {
+                console.error(e);
+                alert("Erreur : " + e.message);
+            }
         };
 
         const addTransaction = async () => {
