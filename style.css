@@ -13,3 +13,24 @@ body {
 
 .tontine-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border-top: 4px solid #cbd5e1; }
 .tontine-card.winner { border-top-color: #10b981; background-color: #ecfdf5; }
+
+/* Mobile responsiveness */
+@media (max-width: 640px) {
+    /* Rendre le tableau scrollable horizontalement au lieu de le cacher */
+    .table-compact { 
+        display: block; 
+        overflow-x: auto; 
+        white-space: nowrap; 
+        width: 100%;
+        -webkit-overflow-scrolling: touch; /* Scroll fluide sur iOS */
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: white;
+    }
+
+    /* Amélioration de l'ergonomie tactile pour les formulaires */
+    input, select, button {
+        min-height: 44px; 
+        font-size: 16px; /* Évite le zoom automatique sur iPhone */
+    }
+}
