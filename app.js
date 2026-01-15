@@ -30,8 +30,9 @@ createApp({
         const isAdmin = computed(() => user.value && user.value.email === 'admin@caisse.com'); 
 
         // --- ETAT APPLICATION ---
-        const currentView = ref('dashboard'); 
-        const currentSalaireView = ref('employes'); 
+        // Récupération du paramètre d'URL pour la navigation depuis salaire.html
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentView = ref(urlParams.get('view') || 'dashboard'); 
         
         // --- DONNEES CAISSE ---
         const currentSession = ref(null);
@@ -65,275 +66,15 @@ createApp({
         const fileInput = ref(null);
         const importStatus = ref('');
 
-        // --- DONNEES SALAIRE & RH ---
-        const employeesList = ref([]);
-        const salaryHistory = ref([]);
-        const salaryFunds = ref([]); 
-        const paiePeriod = ref("15"); 
-        
-        const showAddEmployeeModal = ref(false);
-        const showEditEmployeeModal = ref(false); 
-        const showIndividualHistoryModal = ref(false); 
-        const showPayModal = ref(false);
-        const showFundModal = ref(false);
-
-        const newEmp = ref({ name: '', salary: 0, loan: 0, isTontine: false });
-        const editingEmp = ref({}); 
-        const selectedEmployeeHistoryId = ref(null);
-        const selectedEmployeeHistoryName = ref('');
-        const payForm = ref({});
-        const newFund = ref({ amount: '', note: '' });
         const filterType = ref('ALL'); // 'ALL', 'CREDIT', 'DEBIT'
         const filterMode = ref('ALL'); // 'ALL', 'ESPECE', 'OM', 'WAVE'
-        // PARAMETRE GLOBAL TONTINE
-        const globalTontineAmount = ref(10000); // Valeur par défaut
-        const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7)); // Par défaut : Mois actuel (ex: "2025-01")
-        const selectedPaieMonth = ref(new Date().toISOString().slice(0, 7)); // Mois par défaut = Mois actuel
-        
-        const saveGlobalTontine = async () => {
-            if(!isAdmin.value) return;
-            try {
-                // On sauvegarde dans une collection 'settings', document 'salary'
-                await setDoc(doc(db, "settings", "salary"), { tontineAmount: globalTontineAmount.value }, { merge: true });
-                alert("Nouveau montant de tontine enregistré !");
-            } catch(e) { alert("Erreur : " + e.message); }
-        };
-        
-        const selectedHistoryMonth = ref(null); // Pour l'historique groupé
+
         // 1. Les variables
         const showEditStartAmountModal = ref(false);
         const tempStartAmounts = ref({ espece: 0, om: 0, wave: 0 });
 
         let unsubscribeTransactions = null;
         let lastSessionId = null;
-
-        // ---------------------------------------------------------
-        // --- LOGIQUE SALAIRE ---
-        // ---------------------------------------------------------
-
-        const loadEmployees = () => {
-             onSnapshot(collection(db, "employees"), (snap) => {
-                employeesList.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            });
-        };
-
-        const loadSalaryHistory = () => {
-             onSnapshot(query(collection(db, "salary_payments"), orderBy('timestamp', 'desc')), (snap) => {
-                salaryHistory.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            });
-        };
-
-        const loadSalaryFunds = () => {
-             onSnapshot(query(collection(db, "salary_funds"), orderBy('timestamp', 'desc')), (snap) => {
-                salaryFunds.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            });
-        };
-
-        // GESTION EMPLOYES
-        const saveNewEmployee = async () => {
-            if(!newEmp.value.name || !newEmp.value.salary) return;
-            try {
-                await addDoc(collection(db, "employees"), { 
-                    name: newEmp.value.name, 
-                    salary: newEmp.value.salary, 
-                    loan: newEmp.value.loan || 0, 
-                    isTontine: newEmp.value.isTontine
-                    // Plus besoin de tontineAmount ici
-                });
-                showAddEmployeeModal.value = false;
-                newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
-            } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        const openEditEmployee = (emp) => {
-            editingEmp.value = { ...emp };
-            showEditEmployeeModal.value = true;
-        };
-
-        const updateEmployee = async () => {
-            try {
-                await updateDoc(doc(db, "employees", editingEmp.value.id), { name: editingEmp.value.name, salary: editingEmp.value.salary, loan: editingEmp.value.loan, isTontine: editingEmp.value.isTontine });
-                showEditEmployeeModal.value = false;
-            } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        const deleteEmployee = async (id) => { if(confirm("Supprimer cet employé ?")) await deleteDoc(doc(db, "employees", id)); };
-
-        // CALCULS PAIE (INTELLIGENT)
-        const calculateBase = (emp) => {
-            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
-
-            if (paiePeriod.value === '15') return Math.round(emp.salary / 2);
-
-            if (paiePeriod.value === '30') {
-                const advancePayment = salaryHistory.value.find(p => 
-                    p.employeeId === emp.id && 
-                    p.month === currentMonth && 
-                    p.type.includes('Acompte')
-                );
-
-                if (advancePayment) {
-                    const totalAdvance = (advancePayment.net || 0) + (advancePayment.loan || 0) + (advancePayment.tontine || 0);
-                    return emp.salary - totalAdvance;
-                }
-                return emp.salary;
-            }
-            return 0;
-        };
-        
-        const calculateLoanDeduc = (emp) => (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
-        // On utilise la variable globale au lieu du champ employé
-        const calculateTontineDeduc = (emp) => (emp.isTontine) ? globalTontineAmount.value : 0;
-        const calculateNet = (emp) => calculateBase(emp) - calculateLoanDeduc(emp) - calculateTontineDeduc(emp);
-
-        const unpaidEmployees = computed(() => {
-            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
-            const typeKey = paiePeriod.value === '15' ? 'Acompte' : 'Solde';
-            return employeesList.value.filter(emp => !salaryHistory.value.some(pay => pay.employeeId === emp.id && pay.month === currentMonth && pay.type.includes(typeKey)));
-        });
-        // TOTAUX DYNAMIQUES POUR LA SAISIE PAIE
-        const paieTotals = computed(() => {
-            let t = { base: 0, loan: 0, tontine: 0, net: 0 };
-            
-            // On boucle sur la liste affichée
-            unpaidEmployees.value.forEach(emp => {
-                t.base += calculateBase(emp);
-                t.loan += calculateLoanDeduc(emp);
-                t.tontine += calculateTontineDeduc(emp);
-                t.net += calculateNet(emp);
-            });
-            
-            return t;
-        });
-
-        // PAIEMENT
-        const openPayModal = (emp) => {
-            const currentMonth = selectedPaieMonth.value; // <--- MODIFICATION ICI
-            const baseAmount = calculateBase(emp);
-            const suggestedLoan = (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
-            const tontineAmount = calculateTontineDeduc(emp);
-
-            payForm.value = {
-                id: emp.id, name: emp.name, month: currentMonth, // Le mois sélectionné est sauvegardé
-                base: baseAmount,
-                loan: suggestedLoan, maxLoan: emp.loan || 0,
-                tontine: tontineAmount,
-                net: baseAmount - suggestedLoan - tontineAmount
-            };
-            showPayModal.value = true;
-        };;
-
-        const recalcNet = () => {
-            if (payForm.value.loan > payForm.value.maxLoan) payForm.value.loan = payForm.value.maxLoan;
-            
-            // MODIFICATION : On inclut la tontine (qui peut être modifiée à 0) dans le calcul
-            payForm.value.net = payForm.value.base - payForm.value.loan - (payForm.value.tontine || 0);
-        };
-
-        const confirmSalaryPayment = async () => {
-            try {
-                await addDoc(collection(db, "salary_payments"), {
-                    employeeId: payForm.value.id, employeeName: payForm.value.name, month: payForm.value.month,
-                    type: paiePeriod.value === '15' ? 'Acompte (15)' : 'Solde (Fin)',
-                    base: payForm.value.base, loan: payForm.value.loan, tontine: payForm.value.tontine, net: payForm.value.net,
-                    timestamp: Timestamp.now()
-                });
-                if(payForm.value.loan > 0) {
-                    const emp = employeesList.value.find(e => e.id === payForm.value.id);
-                    if(emp) await updateDoc(doc(db, "employees", payForm.value.id), { loan: Math.max(0, emp.loan - payForm.value.loan) });
-                }
-                showPayModal.value = false;
-                alert("Paiement validé !");
-            } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        const deleteSalaryPayment = async (payment) => {
-             if(!confirm("Annuler ce paiement ?")) return;
-             try {
-                if(payment.loan > 0) {
-                    const emp = employeesList.value.find(e => e.id === payment.employeeId);
-                    if(emp) await updateDoc(doc(db, "employees", payment.employeeId), { loan: emp.loan + payment.loan });
-                }
-                await deleteDoc(doc(db, "salary_payments", payment.id));
-             } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        // HISTORIQUE & STATS
-        const openIndividualHistory = (emp) => { selectedEmployeeHistoryId.value = emp.id; selectedEmployeeHistoryName.value = emp.name; showIndividualHistoryModal.value = true; };
-        const individualHistory = computed(() => selectedEmployeeHistoryId.value ? salaryHistory.value.filter(p => p.employeeId === selectedEmployeeHistoryId.value) : []);
-
-        const groupedSalaryHistory = computed(() => {
-            const groups = {};
-            salaryHistory.value.forEach(pay => {
-                const m = pay.month;
-                if (!groups[m]) groups[m] = { month: m, totalNet: 0, totalLoan: 0, payments: [] };
-                groups[m].totalNet += (pay.net || 0);
-                groups[m].totalLoan += (pay.loan || 0);
-                groups[m].payments.push(pay);
-            });
-            return Object.values(groups).sort((a, b) => b.month.localeCompare(a.month));
-        });
-        const openMonthDetails = (group) => { group.payments.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds); selectedHistoryMonth.value = group; };
-        const closeMonthDetails = () => { selectedHistoryMonth.value = null; };
-
-        // FONDS & BUDGET
-        // Remplacez l'ancienne fonction par celle-ci
-        const saveSalaryFund = async () => {
-            if(!newFund.value.amount) return;
-            try { 
-                await addDoc(collection(db, "salary_funds"), { 
-                    amount: newFund.value.amount, 
-                    note: newFund.value.note || 'Dotation', 
-                    targetMonth: newFund.value.targetMonth || selectedBudgetMonth.value, // Le mois ciblé
-                    timestamp: Timestamp.now() 
-                }); 
-                showFundModal.value = false; 
-                newFund.value = { amount: '', note: '', targetMonth: selectedBudgetMonth.value }; // Reset
-                alert("Fonds enregistrés !"); 
-            } catch(e) { alert(e.message); } 
-        };
-        const deleteSalaryFund = async (id) => { if(confirm("Supprimer ?")) await deleteDoc(doc(db, "salary_funds", id)); };
-
-        // STATS DU MOIS EN COURS (Fix Demande)
-        // Remplacez l'ancien computed salaryStats par celui-ci
-        const salaryStats = computed(() => {
-            const target = selectedBudgetMonth.value; // Le mois qu'on regarde (ex: "2025-01")
-            
-            // 1. Total reçu POUR ce mois précis
-            const totalReceived = salaryFunds.value
-                .filter(f => {
-                    // Si le champ targetMonth existe, on l'utilise. Sinon (vieux fonds), on utilise la date de création.
-                    const fundMonth = f.targetMonth || (f.timestamp?.toDate ? f.timestamp.toDate().toISOString().slice(0, 7) : '');
-                    return fundMonth === target;
-                })
-                .reduce((acc, curr) => acc + (curr.amount || 0), 0);
-                
-            // 2. Total payé SUR ce mois précis
-            const totalPaid = salaryHistory.value
-                .filter(p => p.month === target)
-                .reduce((acc, curr) => acc + (curr.net || 0), 0);
-            
-            // 3. Dette totale (reste global, pas lié au mois)
-            const totalLoans = employeesList.value.reduce((acc, curr) => acc + (curr.loan || 0), 0);
-            
-            return { totalReceived, totalPaid, balance: totalReceived - totalPaid, totalLoans };
-        });
-
-        // TONTINE
-        const tontineMembers = computed(() => employeesList.value.filter(e => e.isTontine));
-        const hasPaidTontine = (empId) => {
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            return salaryHistory.value.some(p => p.employeeId === empId && p.month === currentMonth && p.tontine > 0);
-        };
-
-        const exportSalaryHistoryPDF = () => {
-            if (!window.jspdf) return;
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text("Journal des Paiements Salaires", 14, 20);
-            const rows = salaryHistory.value.map(p => [formatDate(p.timestamp), p.month, p.employeeName, p.type, formatMoney(p.net)]);
-            doc.autoTable({ head: [["Date", "Mois", "Employé", "Type", "Montant"]], body: rows, startY: 30 });
-            doc.save("Salaires.pdf");
-        };
 
         // ---------------------------------------------------------
         // --- LOGIQUE CAISSE GENERALE ---
@@ -422,6 +163,51 @@ createApp({
 
             return filtered.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
         });
+        // --- LOGIQUE DE REGROUPEMENT PAR RÉFÉRENCE ---
+        const groupedTransactions = computed(() => {
+            const groups = {};
+            const result = [];
+            
+            // 1. On parcourt toutes les transactions visibles
+            visibleTransactions.value.forEach(tx => {
+                // Clé unique : Référence + Mode + Type (Ex: "CI230115-OM-CREDIT")
+                // Si pas de référence, on génère un ID unique pour ne pas regrouper
+                const hasRef = tx.reference && tx.reference.length > 3; // Au moins 4 caractères
+                const key = hasRef ? `${tx.reference.trim()}-${tx.category}-${tx.type}` : `unique-${tx.id}`;
+
+                if (!groups[key]) {
+                    // Création d'un nouveau groupe
+                    const newGroup = {
+                        id: 'group-' + key,
+                        isGroup: true,
+                        key: key,
+                        reference: tx.reference,
+                        timestamp: tx.timestamp, // On garde la date du premier
+                        category: tx.category,
+                        type: tx.type,
+                        children: [tx], // Liste des sous-opérations
+                        totalAmount: tx.amount, // Somme cumulée
+                        totalFees: tx.fees || 0,
+                        isOpen: false // Fermé par défaut
+                    };
+                    groups[key] = newGroup;
+                    result.push(newGroup);
+                } else {
+                    // Ajout à un groupe existant
+                    const group = groups[key];
+                    group.children.push(tx);
+                    group.totalAmount += tx.amount; // On additionne les montants
+                    group.totalFees += (tx.fees || 0);
+                }
+            });
+
+            return result;
+        });
+
+        // Fonction pour ouvrir/fermer une ligne
+        const toggleGroup = (group) => {
+            group.isOpen = !group.isOpen;
+        };
 
         const historyModalTotals = computed(() => {
             let t = { entree: 0, sortie: 0, espece: 0, om: 0, wave: 0 };
@@ -503,15 +289,8 @@ createApp({
                         loadLastClosedSession(); 
                     }
                 });
-                // AJOUTER CECI : Chargement du paramètre Tontine
-                onSnapshot(doc(db, "settings", "salary"), (docSnap) => {
-                    if (docSnap.exists()) {
-                        globalTontineAmount.value = docSnap.data().tontineAmount || 10000;
-                    }
-                });
                 onSnapshot(query(collection(db, "sessions"), where("status", "==", "CLOSED"), orderBy("endTime", "desc")), (snap) => { closedSessions.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
                 onSnapshot(collection(db, "clients"), (snap) => { clientDatabase.value = snap.docs.map(d => ({ id: d.id, ...d.data() })); });
-                loadEmployees(); loadSalaryHistory(); loadSalaryFunds();
             }
         });
         // Filtre pour l'historique des sessions
@@ -825,7 +604,6 @@ createApp({
         };
         // 2. La fonction pour OUVRIR la fenêtre
         const openEditStartAmounts = () => {
-            console.log("1. Clic détecté");
             if (currentSession.value) {
                 tempStartAmounts.value = { 
                     espece: currentSession.value.startAmount?.espece || 0,
@@ -835,7 +613,6 @@ createApp({
                 
                 showEditStartAmountModal.value = true;
             } else {
-                console.error("ERREUR : Aucune session active détectée (currentSession est null)");
                 alert("Erreur : Impossible de trouver la session active.");
             }
         };
@@ -1187,19 +964,11 @@ createApp({
             closedSessions, showHistoryModal, selectedSessionHistory, selectedTransactionsHistory, visibleHistoryTransactions, openHistoryDetails,
             clientDatabase, searchQuery, showSuggestions, filteredClients, selectClient, importClients, fileInput, importStatus,
             startSession, addTransaction, openClosingModal, confirmClose, deleteTransaction, showEditStartAmountModal, tempStartAmounts, openEditStartAmounts, saveEditedStartAmounts,
-            formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF,
+            formatMoney, formatTime, formatDate, formatDateTime, getBadgeClass, getGapClass, formatGap, exportToExcel, exportToPDF, groupedTransactions, toggleGroup,
             saveBilletage, getModeAbbr, showHiddenTransactions, historyModalTotals, historySearchQuery, filteredHistory,performGlobalSearch, triggerSmartFilter,
              globalSearchResults, isSearchingGlobal, historyFilterState, filteredGlobalResults, calculateNetGlobal, filterType, filterMode, realOmInput, realWaveInput,
             
-            // EXPORTS SALAIRE
-            currentSalaireView, employeesList, salaryHistory, salaryFunds, paiePeriod, selectedPaieMonth,
-            showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, showFundModal, activeQuickFilter, exportHistoryTablePDF,
-            newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
-            groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
-            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth,
-            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
-            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals,
-            saveSalaryFund, deleteSalaryFund, salaryStats, showEditTransactionModal, editingTx, openEditTransaction, saveEditedTransaction, selectClientForEdit
+            activeQuickFilter, exportHistoryTablePDF, showEditTransactionModal, editingTx, openEditTransaction, saveEditedTransaction, selectClientForEdit
         };
     }
 }).mount('#app');
