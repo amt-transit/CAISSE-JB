@@ -1,13 +1,9 @@
-// /dev/null
-// c:\Users\JEANAFFA\OneDrive\Documents\GitHub\CAISSE-JB\salaire.js
 import { createApp, ref, computed, onMounted, watch } from "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, setDoc, deleteDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDocs, Timestamp, writeBatch, getDoc, limit } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 
-// ---------------------------------------------------------
 // CONFIGURATION FIREBASE
-// ---------------------------------------------------------
 const firebaseConfig = {
     apiKey: "AIzaSyDvo7FRCpr_mE4nTGz6VW7-UL0U1JKe-g8",
     authDomain: "caisse-jb.firebaseapp.com",
@@ -17,24 +13,19 @@ const firebaseConfig = {
     appId: "1:877905828814:web:79840cd0dfcb8a8036e99f"   
 };
 
-// Initialisation
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
 createApp({
     setup() {
-        // --- ETAT AUTHENTIFICATION ---
         const user = ref(null);
         const authLoading = ref(true);
         const loginForm = ref({ email: '', password: '' });
         const loginError = ref('');
         const isAdmin = computed(() => user.value && user.value.email === 'admin@caisse.com'); 
 
-        // --- ETAT APPLICATION SALAIRE ---
         const currentSalaireView = ref('employes'); 
-        
-        // --- DONNEES SALAIRE & RH ---
         const employeesList = ref([]);
         const salaryHistory = ref([]);
         const salaryFunds = ref([]); 
@@ -53,16 +44,12 @@ createApp({
         const payForm = ref({});
         const newFund = ref({ amount: '', note: '' });
         
-        // PARAMETRE GLOBAL TONTINE
-        const globalTontineAmount = ref(10000); // Valeur par défaut
-        const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7)); // Par défaut : Mois actuel (ex: "2025-01")
-        const selectedPaieMonth = ref(new Date().toISOString().slice(0, 7)); // Mois par défaut = Mois actuel
-        const selectedHistoryMonth = ref(null); // Pour l'historique groupé
+        const globalTontineAmount = ref(10000);
+        const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7));
+        const selectedPaieMonth = ref(new Date().toISOString().slice(0, 7));
+        const selectedHistoryMonth = ref(null);
 
-        // ---------------------------------------------------------
-        // --- LOGIQUE SALAIRE ---
-        // ---------------------------------------------------------
-
+        // --- CHARGEMENT DES DONNÉES ---
         const loadEmployees = () => {
              onSnapshot(collection(db, "employees"), (snap) => {
                 employeesList.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -81,73 +68,89 @@ createApp({
             });
         };
 
-        const saveGlobalTontine = async () => {
-            if(!isAdmin.value) return;
-            try {
-                await setDoc(doc(db, "settings", "salary"), { tontineAmount: globalTontineAmount.value }, { merge: true });
-                alert("Nouveau montant de tontine enregistré !");
-            } catch(e) { alert("Erreur : " + e.message); }
+        // --- COEUR DU SYSTÈME : CALCULS ROBUSTES ---
+
+        // 1. Fonction utilitaire pour savoir ce qui a DÉJÀ été payé ce mois-ci
+        const getMonthlySummary = (emp, month) => {
+            const payments = salaryHistory.value.filter(p => p.employeeId === emp.id && p.month === month);
+            
+            const totalNetPaid = payments.reduce((sum, p) => sum + (p.net || 0), 0);
+            const totalLoanPaid = payments.reduce((sum, p) => sum + (p.loan || 0), 0);
+            const totalTontinePaid = payments.reduce((sum, p) => sum + (p.tontine || 0), 0);
+            
+            // Le salaire "Brut" déjà couvert = Net perçu + Dettes remboursées + Tontine payée
+            const totalGrossPaid = totalNetPaid + totalLoanPaid + totalTontinePaid;
+
+            return { totalNetPaid, totalLoanPaid, totalTontinePaid, totalGrossPaid };
         };
 
-        // GESTION EMPLOYES
-        const saveNewEmployee = async () => {
-            if(!newEmp.value.name || !newEmp.value.salary) return;
-            try {
-                await addDoc(collection(db, "employees"), { 
-                    name: newEmp.value.name, 
-                    salary: newEmp.value.salary, 
-                    loan: newEmp.value.loan || 0, 
-                    isTontine: newEmp.value.isTontine
-                });
-                showAddEmployeeModal.value = false;
-                newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
-            } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        const openEditEmployee = (emp) => {
-            editingEmp.value = { ...emp };
-            showEditEmployeeModal.value = true;
-        };
-
-        const updateEmployee = async () => {
-            try {
-                await updateDoc(doc(db, "employees", editingEmp.value.id), { name: editingEmp.value.name, salary: editingEmp.value.salary, loan: editingEmp.value.loan, isTontine: editingEmp.value.isTontine });
-                showEditEmployeeModal.value = false;
-            } catch(e) { alert("Erreur: " + e.message); }
-        };
-
-        const deleteEmployee = async (id) => { if(confirm("Supprimer cet employé ?")) await deleteDoc(doc(db, "employees", id)); };
-
-        // CALCULS PAIE (INTELLIGENT)
+        // 2. Calcul du salaire de base (Ce qu'il reste à payer BRUT)
         const calculateBase = (emp) => {
-            const currentMonth = selectedPaieMonth.value;
-
-            if (paiePeriod.value === '15') return Math.round(emp.salary / 2);
-
+            const summary = getMonthlySummary(emp, selectedPaieMonth.value);
+            
+            // Si période Acompte (15) : Cible = 50% du salaire
+            if (paiePeriod.value === '15') {
+                const target = Math.round(emp.salary / 2);
+                const remaining = target - summary.totalGrossPaid;
+                return Math.max(0, remaining);
+            }
+            
+            // Si période Solde (30) : Cible = 100% du salaire
             if (paiePeriod.value === '30') {
-                const advancePayment = salaryHistory.value.find(p => 
-                    p.employeeId === emp.id && 
-                    p.month === currentMonth && 
-                    p.type.includes('Acompte')
-                );
-
-                if (advancePayment) {
-                    const totalAdvance = (advancePayment.net || 0) + (advancePayment.loan || 0) + (advancePayment.tontine || 0);
-                    return emp.salary - totalAdvance;
-                }
-                return emp.salary;
+                const remaining = emp.salary - summary.totalGrossPaid;
+                return Math.max(0, remaining);
             }
             return 0;
         };
-        
-        const calculateLoanDeduc = (emp) => (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
-        const calculateTontineDeduc = (emp) => (emp.isTontine) ? globalTontineAmount.value : 0;
-        const calculateNet = (emp) => calculateBase(emp) - calculateLoanDeduc(emp) - calculateTontineDeduc(emp);
 
+        // 3. Calcul Tontine (Ne payer que si pas encore fait ce mois-ci)
+        const calculateTontineDeduc = (emp) => {
+            if (!emp.isTontine) return 0;
+            // On ne propose la tontine que pour le SOLDE (30), pas l'acompte
+            if (paiePeriod.value === '15') return 0;
+
+            const summary = getMonthlySummary(emp, selectedPaieMonth.value);
+            // Si on a déjà payé au moins le montant de la tontine ce mois-ci en tontine, c'est bon
+            if (summary.totalTontinePaid >= globalTontineAmount.value) return 0;
+
+            return globalTontineAmount.value;
+        };
+
+        // 4. Calcul Prêt (Plafond 10k mais intelligent)
+        const calculateLoanDeduc = (emp) => {
+            if (!emp.loan || emp.loan <= 0) return 0;
+            
+            // On propose 10.000 ou le reste de la dette
+            const standardDeduc = Math.min(emp.loan, 10000);
+            
+            // MAIS on vérifie qu'il reste assez de salaire pour payer ça
+            const base = calculateBase(emp);
+            const tontine = calculateTontineDeduc(emp);
+            
+            // Reste disponible après tontine
+            const available = Math.max(0, base - tontine);
+            
+            // On ne prend pas plus que ce qui est disponible
+            return Math.min(standardDeduc, available);
+        };
+
+        // 5. Calcul du Net
+        const calculateNet = (emp) => {
+            const base = calculateBase(emp);
+            const loan = calculateLoanDeduc(emp);
+            const tontine = calculateTontineDeduc(emp);
+            return Math.max(0, base - loan - tontine);
+        };
+
+        // 6. Liste des impayés (CORRIGÉE : Ne disparaît que si tout est payé)
         const unpaidEmployees = computed(() => {
-            const currentMonth = selectedPaieMonth.value;
-            const typeKey = paiePeriod.value === '15' ? 'Acompte' : 'Solde';
-            return employeesList.value.filter(emp => !salaryHistory.value.some(pay => pay.employeeId === emp.id && pay.month === currentMonth && pay.type.includes(typeKey)));
+            return employeesList.value.filter(emp => {
+                // On garde l'employé tant qu'il reste de l'argent à verser pour la cible
+                // Si Acompte (15) : Tant qu'on n'a pas atteint 50%
+                // Si Solde (30) : Tant qu'on n'a pas atteint 100%
+                const remaining = calculateBase(emp);
+                return remaining > 0; // Si reste > 0, il s'affiche
+            });
         });
 
         const paieTotals = computed(() => {
@@ -161,17 +164,29 @@ createApp({
             return t;
         });
 
-        // PAIEMENT
+        const employeesTotals = computed(() => {
+            return employeesList.value.reduce((acc, emp) => {
+                acc.salary += (parseFloat(emp.salary) || 0);
+                acc.loan += (parseFloat(emp.loan) || 0);
+                if (emp.isTontine) acc.tontine += (parseFloat(globalTontineAmount.value) || 0);
+                return acc;
+            }, { salary: 0, loan: 0, tontine: 0 });
+        });
+
+        // --- ACTIONS ---
+
         const openPayModal = (emp) => {
-            const currentMonth = selectedPaieMonth.value;
             const baseAmount = calculateBase(emp);
-            const suggestedLoan = (emp.loan > 0) ? Math.min(emp.loan, 10000) : 0;
+            const suggestedLoan = calculateLoanDeduc(emp);
             const tontineAmount = calculateTontineDeduc(emp);
 
             payForm.value = {
-                id: emp.id, name: emp.name, month: currentMonth,
+                id: emp.id, 
+                name: emp.name, 
+                month: selectedPaieMonth.value,
                 base: baseAmount,
-                loan: suggestedLoan, maxLoan: emp.loan || 0,
+                loan: suggestedLoan, 
+                maxLoan: emp.loan || 0,
                 tontine: tontineAmount,
                 net: baseAmount - suggestedLoan - tontineAmount
             };
@@ -180,25 +195,75 @@ createApp({
 
         const recalcNet = () => {
             if (payForm.value.loan > payForm.value.maxLoan) payForm.value.loan = payForm.value.maxLoan;
-            payForm.value.net = payForm.value.base - payForm.value.loan - (payForm.value.tontine || 0);
+            // Sécurité pour ne pas avoir de net négatif
+            const deductions = (payForm.value.loan || 0) + (payForm.value.tontine || 0);
+            if (deductions > payForm.value.base) {
+                // On bloque visuellement ou on laisse faire (choix utilisateur), ici on laisse faire mais le net sera négatif ou on bloque
+                // payForm.value.net = 0; 
+            }
+            payForm.value.net = payForm.value.base - (payForm.value.loan || 0) - (payForm.value.tontine || 0);
+        };
+
+        const updateBaseFromNet = () => {
+            payForm.value.base = (parseFloat(payForm.value.net) || 0) + (parseFloat(payForm.value.loan) || 0) + (parseFloat(payForm.value.tontine) || 0);
         };
 
         const confirmSalaryPayment = async () => {
             try {
+                // On enregistre
                 await addDoc(collection(db, "salary_payments"), {
-                    employeeId: payForm.value.id, employeeName: payForm.value.name, month: payForm.value.month,
+                    employeeId: payForm.value.id, 
+                    employeeName: payForm.value.name, 
+                    month: payForm.value.month,
                     type: paiePeriod.value === '15' ? 'Acompte (15)' : 'Solde (Fin)',
-                    base: payForm.value.base, loan: payForm.value.loan, tontine: payForm.value.tontine, net: payForm.value.net,
+                    base: payForm.value.base, 
+                    loan: payForm.value.loan, 
+                    tontine: payForm.value.tontine, 
+                    net: payForm.value.net,
                     timestamp: Timestamp.now()
                 });
+                
+                // On met à jour la dette de l'employé
                 if(payForm.value.loan > 0) {
                     const emp = employeesList.value.find(e => e.id === payForm.value.id);
                     if(emp) await updateDoc(doc(db, "employees", payForm.value.id), { loan: Math.max(0, emp.loan - payForm.value.loan) });
                 }
+                
                 showPayModal.value = false;
-                alert("Paiement validé !");
+                // alert("Paiement enregistré !");
             } catch(e) { alert("Erreur: " + e.message); }
         };
+
+        // --- RESTE DU CODE (GESTION RH, TONTINE, PDF...) ---
+        // (Identique à votre logique existante pour ne pas tout casser)
+
+        const saveGlobalTontine = async () => {
+            if(!isAdmin.value) return;
+            try {
+                await setDoc(doc(db, "settings", "salary"), { tontineAmount: globalTontineAmount.value }, { merge: true });
+                alert("Nouveau montant de tontine enregistré !");
+            } catch(e) { alert("Erreur : " + e.message); }
+        };
+
+        const saveNewEmployee = async () => {
+            if(!newEmp.value.name || !newEmp.value.salary) return;
+            try {
+                await addDoc(collection(db, "employees"), { 
+                    name: newEmp.value.name, salary: newEmp.value.salary, loan: newEmp.value.loan || 0, isTontine: newEmp.value.isTontine
+                });
+                showAddEmployeeModal.value = false;
+                newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
+            } catch(e) { alert("Erreur: " + e.message); }
+        };
+
+        const openEditEmployee = (emp) => { editingEmp.value = { ...emp }; showEditEmployeeModal.value = true; };
+        const updateEmployee = async () => {
+            try {
+                await updateDoc(doc(db, "employees", editingEmp.value.id), { name: editingEmp.value.name, salary: editingEmp.value.salary, loan: editingEmp.value.loan, isTontine: editingEmp.value.isTontine });
+                showEditEmployeeModal.value = false;
+            } catch(e) { alert("Erreur: " + e.message); }
+        };
+        const deleteEmployee = async (id) => { if(confirm("Supprimer cet employé ?")) await deleteDoc(doc(db, "employees", id)); };
 
         const deleteSalaryPayment = async (payment) => {
              if(!confirm("Annuler ce paiement ?")) return;
@@ -211,57 +276,46 @@ createApp({
              } catch(e) { alert("Erreur: " + e.message); }
         };
 
-        // HISTORIQUE & STATS
         const openIndividualHistory = (emp) => { selectedEmployeeHistoryId.value = emp.id; selectedEmployeeHistoryName.value = emp.name; showIndividualHistoryModal.value = true; };
         const individualHistory = computed(() => selectedEmployeeHistoryId.value ? salaryHistory.value.filter(p => p.employeeId === selectedEmployeeHistoryId.value) : []);
 
+        // Regroupement Historique (Corrigé selon demande précédente)
         const groupedSalaryHistory = computed(() => {
             const groups = {};
             salaryHistory.value.forEach(pay => {
-                const m = pay.month;
-                if (!groups[m]) groups[m] = { month: m, totalNet: 0, totalLoan: 0, payments: [] };
-                groups[m].totalNet += (pay.net || 0);
-                groups[m].totalLoan += (pay.loan || 0);
-                groups[m].payments.push(pay);
+                if (!groups[pay.month]) groups[pay.month] = { month: pay.month, payments: [], totalNet: 0, totalLoan: 0, totalFund: 0 };
+                groups[pay.month].payments.push(pay);
+                groups[pay.month].totalNet += pay.net;
+                groups[pay.month].totalLoan += (pay.loan || 0);
             });
-            return Object.values(groups).sort((a, b) => b.month.localeCompare(a.month));
+            salaryFunds.value.forEach(fund => {
+                const m = fund.targetMonth;
+                if (!groups[m]) groups[m] = { month: m, payments: [], totalNet: 0, totalLoan: 0, totalFund: 0 };
+                groups[m].totalFund += fund.amount;
+            });
+            return Object.values(groups).sort((a, b) => b.month.localeCompare(a.month)).map(group => ({ ...group, balance: group.totalFund - group.totalNet }));
         });
+
         const openMonthDetails = (group) => { group.payments.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds); selectedHistoryMonth.value = group; };
         const closeMonthDetails = () => { selectedHistoryMonth.value = null; };
 
-        // FONDS & BUDGET
         const saveSalaryFund = async () => {
             if(!newFund.value.amount) return;
             try { 
-                await addDoc(collection(db, "salary_funds"), { 
-                    amount: newFund.value.amount, 
-                    note: newFund.value.note || 'Dotation', 
-                    targetMonth: newFund.value.targetMonth || selectedBudgetMonth.value,
-                    timestamp: Timestamp.now() 
-                }); 
-                showFundModal.value = false; 
-                newFund.value = { amount: '', note: '', targetMonth: selectedBudgetMonth.value };
-                alert("Fonds enregistrés !"); 
+                await addDoc(collection(db, "salary_funds"), { amount: newFund.value.amount, note: newFund.value.note || 'Dotation', targetMonth: newFund.value.targetMonth || selectedBudgetMonth.value, timestamp: Timestamp.now() }); 
+                showFundModal.value = false; newFund.value = { amount: '', note: '', targetMonth: selectedBudgetMonth.value }; alert("Fonds enregistrés !"); 
             } catch(e) { alert(e.message); } 
         };
         const deleteSalaryFund = async (id) => { if(confirm("Supprimer ?")) await deleteDoc(doc(db, "salary_funds", id)); };
 
         const salaryStats = computed(() => {
             const target = selectedBudgetMonth.value;
-            const totalReceived = salaryFunds.value
-                .filter(f => {
-                    const fundMonth = f.targetMonth || (f.timestamp?.toDate ? f.timestamp.toDate().toISOString().slice(0, 7) : '');
-                    return fundMonth === target;
-                })
-                .reduce((acc, curr) => acc + (curr.amount || 0), 0);
-            const totalPaid = salaryHistory.value
-                .filter(p => p.month === target)
-                .reduce((acc, curr) => acc + (curr.net || 0), 0);
+            const totalReceived = salaryFunds.value.filter(f => (f.targetMonth || (f.timestamp?.toDate ? f.timestamp.toDate().toISOString().slice(0, 7) : '')) === target).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+            const totalPaid = salaryHistory.value.filter(p => p.month === target).reduce((acc, curr) => acc + (curr.net || 0), 0);
             const totalLoans = employeesList.value.reduce((acc, curr) => acc + (curr.loan || 0), 0);
             return { totalReceived, totalPaid, balance: totalReceived - totalPaid, totalLoans };
         });
 
-        // TONTINE
         const tontineMembers = computed(() => employeesList.value.filter(e => e.isTontine));
         const hasPaidTontine = (empId) => {
             const currentMonth = new Date().toISOString().slice(0, 7);
@@ -269,19 +323,115 @@ createApp({
         };
 
         const exportSalaryHistoryPDF = () => {
-            if (!window.jspdf) return;
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text("Journal des Paiements Salaires", 14, 20);
-            const rows = salaryHistory.value.map(p => [formatDate(p.timestamp), p.month, p.employeeName, p.type, formatMoney(p.net)]);
-            doc.autoTable({ head: [["Date", "Mois", "Employé", "Type", "Montant"]], body: rows, startY: 30 });
-            doc.save("Salaires.pdf");
+            const doc = new jspdf.jsPDF();
+            
+            // 1. En-tête Principal du Document
+            doc.setFontSize(18);
+            doc.setTextColor(40);
+            doc.text("Rapport Détaillé des Salaires", 14, 20);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text("Généré le : " + new Date().toLocaleString(), 14, 28);
+            
+            let currentY = 35; // Position verticale de départ
+
+            // 2. On boucle sur CHAQUE MOIS de l'historique
+            groupedSalaryHistory.value.forEach(group => {
+                
+                // Vérifier s'il reste assez de place sur la page, sinon nouvelle page
+                if (currentY > 250) {
+                    doc.addPage();
+                    currentY = 20;
+                }
+
+                // --- CADRE RÉSUMÉ DU MOIS ---
+                doc.setFillColor(245, 247, 250); // Fond gris très clair
+                doc.setDrawColor(200, 200, 200); // Bordure grise
+                doc.roundedRect(14, currentY, 182, 18, 2, 2, 'FD'); // Rectangle rempli
+                
+                doc.setFontSize(12);
+                doc.setTextColor(0);
+                doc.setFont("helvetica", "bold");
+                doc.text(`Période : ${group.month}`, 20, currentY + 8);
+                
+                doc.setFontSize(10);
+                doc.setFont("helvetica", "normal");
+                
+                // Ligne des Totaux (Budget / Payé / Solde)
+                // On formate les montants proprement
+                const budgetTxt = `Budget: ${formatMoney(group.totalFund)}`;
+                const payeTxt = `Payé: ${formatMoney(group.totalNet)}`;
+                const soldeTxt = `Reste: ${formatMoney(group.balance)}`;
+                
+                doc.text(budgetTxt, 20, currentY + 14);
+                doc.setTextColor(75, 85, 99); // Gris
+                doc.text(payeTxt, 80, currentY + 14);
+                
+                // Couleur dynamique pour le Solde
+                if (group.balance < 0) doc.setTextColor(220, 38, 38); // Rouge
+                else doc.setTextColor(22, 163, 74); // Vert
+                doc.text(soldeTxt, 140, currentY + 14);
+
+                // --- TABLEAU DÉTAILLÉ DES EMPLOYÉS ---
+                // On prépare les lignes (Triées par date)
+                const sortedPayments = [...group.payments].sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+                
+                const tableBody = sortedPayments.map(p => [
+                    formatDate(p.timestamp),
+                    p.employeeName,
+                    p.type,
+                    p.loan > 0 ? formatMoney(p.loan) : '-', // Afficher '-' si pas de prêt
+                    formatMoney(p.net)
+                ]);
+
+                // Si le mois n'a pas de paiement, on met une ligne vide
+                if (tableBody.length === 0) {
+                    tableBody.push(['-', 'Aucun paiement enregistré', '-', '-', '-']);
+                }
+
+                doc.autoTable({
+                    startY: currentY + 20, // Juste en dessous du cadre résumé
+                    head: [['Date', 'Employé', 'Type', 'Prêt', 'Net Payé']],
+                    body: tableBody,
+                    theme: 'grid',
+                    headStyles: { 
+                        fillColor: [79, 70, 229], // Couleur Indigo (comme votre site)
+                        textColor: 255,
+                        fontStyle: 'bold'
+                    },
+                    styles: { 
+                        fontSize: 9, 
+                        cellPadding: 3 
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 25 }, // Date
+                        3: { halign: 'right', cellWidth: 30 }, // Prêt aligné droite
+                        4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } // Net aligné droite
+                    },
+                    margin: { left: 14, right: 14 },
+                    // Important : Mise à jour de la position Y après le tableau
+                    didDrawPage: (data) => {
+                        // Si le tableau coupe la page, on met à jour currentY pour la suite
+                        currentY = data.cursor.y;
+                    }
+                });
+
+                // Ajouter un espace avant le prochain mois
+                currentY = doc.lastAutoTable.finalY + 15;
+            });
+
+            doc.save("Rapport_Salaires_Complet.pdf");
         };
 
-        // UTILITAIRES
-        const formatMoney = (m) => new Intl.NumberFormat('fr-FR').format(m || 0) + ' F';
+        // Fonction qui remplace l'espace insécable (problématique en PDF) par un espace normal
+        const formatMoney = (m) => {
+            if (!m && m !== 0) return '0 F';
+            // On formate en FR, puis on remplace le caractère invisible (\u202f ou \u00a0) par un espace simple
+            return new Intl.NumberFormat('fr-FR').format(m).replace(/\s/g, ' ') + ' F';
+        };
         const formatDate = (ts) => { if (!ts) return '-'; const d = ts.toDate ? ts.toDate() : new Date(ts); const day = d.getDate().toString().padStart(2, '0'); let month = d.toLocaleString('fr-FR', { month: 'short' }).replace('.', ''); month = month.charAt(0).toUpperCase() + month.slice(1); const year = d.getFullYear(); return `${day}-${month}-${year}`; };
         
-        // AUTH
         const login = async () => { try { await signInWithEmailAndPassword(auth, loginForm.value.email, loginForm.value.password); } catch (e) { loginError.value = "Erreur de connexion"; } };
         const logout = async () => { await signOut(auth); };
 
@@ -289,11 +439,7 @@ createApp({
             user.value = u; authLoading.value = false;
             if (u) {
                 loadEmployees(); loadSalaryHistory(); loadSalaryFunds();
-                onSnapshot(doc(db, "settings", "salary"), (docSnap) => {
-                    if (docSnap.exists()) {
-                        globalTontineAmount.value = docSnap.data().tontineAmount || 10000;
-                    }
-                });
+                onSnapshot(doc(db, "settings", "salary"), (docSnap) => { if (docSnap.exists()) globalTontineAmount.value = docSnap.data().tontineAmount || 10000; });
             }
         });
 
@@ -305,8 +451,8 @@ createApp({
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth,
-            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
-            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals,
+            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
+            calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals, employeesTotals,
             saveSalaryFund, deleteSalaryFund, salaryStats
         };
     }

@@ -14,6 +14,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
+<style>
+    [v-cloak] {
+        display: none !important;
+    }
+</style>
 <body class="text-gray-800 text-sm">
 
 <div id="app" class="min-h-screen flex flex-col" v-cloak>
@@ -80,6 +85,15 @@
                                     </td>
                                 </tr>
                             </tbody>
+                            <tfoot class="bg-gray-100 font-bold border-t-2 border-gray-300 sticky bottom-0 z-10 shadow-inner text-xs">
+                                <tr>
+                                    <td class="p-2 text-right uppercase text-gray-600">Totaux :</td>
+                                    <td class="p-2 text-right text-gray-800">{{ formatMoney(employeesTotals.salary) }}</td>
+                                    <td class="p-2 text-right text-red-600">{{ formatMoney(employeesTotals.loan) }}</td>
+                                    <td class="p-2 text-center text-orange-600" title="Total Tontine à collecter">{{ formatMoney(employeesTotals.tontine) }}</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>
@@ -187,8 +201,45 @@
                     </div>
                     <div v-if="!selectedHistoryMonth" class="overflow-auto flex-grow">
                         <table class="w-full text-left table-compact border-collapse">
-                            <thead class="bg-gray-50 sticky top-0"><tr><th>Mois</th><th class="text-right">Total Payé (Net)</th><th class="text-right">Total Prêts Remboursés</th><th class="text-center">Détails</th></tr></thead>
-                            <tbody><tr v-for="group in groupedSalaryHistory" :key="group.month" class="hover:bg-gray-50 cursor-pointer" @click="openMonthDetails(group)"><td class="font-bold text-indigo-700 text-lg">{{ group.month }}</td><td class="text-right font-mono font-bold text-lg text-gray-700">{{ formatMoney(group.totalNet) }}</td><td class="text-right font-mono font-bold text-green-600">{{ formatMoney(group.totalLoan) }}</td><td class="text-center"><button class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold hover:bg-indigo-200">Voir ({{ group.payments.length }}) <i class="fa-solid fa-chevron-right ml-1"></i></button></td></tr><tr v-if="groupedSalaryHistory.length === 0"><td colspan="4" class="text-center py-8 text-gray-400">Aucun historique disponible.</td></tr></tbody>
+                            <thead class="bg-gray-50 sticky top-0 text-xs uppercase text-gray-500">
+                                <tr>
+                                    <th class="p-3">Mois</th>
+                                    <th class="p-3 text-right text-green-700 bg-green-50">Budget (Fonds)</th>
+                                    <th class="p-3 text-right text-indigo-700 bg-indigo-50">Total Payé</th>
+                                    <th class="p-3 text-right font-black border-l">Solde (Reste)</th>
+                                    <th class="p-3 text-right">Prêts Remb.</th>
+                                    <th class="p-3 text-center">Détails</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y">
+                                <tr v-for="group in groupedSalaryHistory" :key="group.month" class="hover:bg-gray-50 cursor-pointer transition" @click="openMonthDetails(group)">
+                                    <td class="p-3 font-bold text-gray-700">{{ group.month }}</td>
+                                    
+                                    <td class="p-3 text-right font-mono font-bold text-green-600 bg-green-50/30">
+                                        {{ formatMoney(group.totalFund) }}
+                                    </td>
+                                    
+                                    <td class="p-3 text-right font-mono font-bold text-indigo-600 bg-indigo-50/30">
+                                        {{ formatMoney(group.totalNet) }}
+                                    </td>
+                                    
+                                    <td class="p-3 text-right font-mono font-bold border-l text-sm">
+                                        <span :class="group.balance >= 0 ? 'text-green-600' : 'text-red-600 bg-red-100 px-1 rounded'">
+                                            {{ formatMoney(group.balance) }}
+                                        </span>
+                                    </td>
+                                    
+                                    <td class="p-3 text-right font-mono text-xs text-gray-500">
+                                        {{ formatMoney(group.totalLoan) }}
+                                    </td>
+                                    
+                                    <td class="p-3 text-center">
+                                        <button class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full text-[10px] font-bold hover:bg-indigo-200">
+                                            <i class="fa-solid fa-eye"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
                         </table>
                     </div>
                     <div v-else class="overflow-auto flex-grow bg-gray-50 rounded border p-2">
@@ -271,7 +322,7 @@
             <div class="bg-white rounded shadow-lg w-80 p-4">
                 <h3 class="text-lg font-bold mb-2">Paiement : {{ payForm.name }}</h3>
                 <div class="bg-gray-50 p-3 mb-2 rounded text-xs border">
-                    <div class="flex justify-between mb-2"><span class="text-gray-600">Salaire Base:</span><span class="font-bold">{{ formatMoney(payForm.base) }}</span></div>
+                    <div class="flex justify-between items-center mb-2"><span class="text-gray-600">Salaire Base:</span><input type="number" v-model.number="payForm.base" @input="recalcNet" class="w-24 text-right border border-gray-300 rounded p-1 font-bold bg-white focus:ring-2 focus:ring-indigo-200 outline-none"></div>
                     <div class="flex justify-between items-center mb-2 text-red-600"><div class="flex flex-col"><span>- Remb. Prêt:</span><span class="text-[9px] text-gray-400">Dette tot: {{ formatMoney(payForm.maxLoan) }}</span></div><input type="number" v-model.number="payForm.loan" @input="recalcNet" class="w-24 text-right border border-red-200 rounded p-1 text-red-600 font-bold bg-white focus:ring-2 focus:ring-red-200 outline-none"></div>
                     <div class="flex justify-between items-center mb-2 text-orange-500">
                         <div class="flex flex-col">
@@ -280,7 +331,7 @@
                         </div>
                         <input type="number" v-model.number="payForm.tontine" @input="recalcNet" class="w-24 text-right border border-orange-200 rounded p-1 text-orange-600 font-bold bg-white focus:ring-2 focus:ring-orange-200 outline-none">
                     </div>
-                    <div class="flex justify-between font-bold text-lg border-t border-gray-300 mt-2 pt-2 text-indigo-700"><span>NET À PAYER:</span><span>{{ formatMoney(payForm.net) }}</span></div>
+                    <div class="flex justify-between items-center font-bold text-lg border-t border-gray-300 mt-2 pt-2 text-indigo-700"><span>NET À PAYER:</span><input type="number" v-model.number="payForm.net" @input="updateBaseFromNet" class="w-32 text-right border border-indigo-200 rounded p-1 text-indigo-700 font-bold bg-indigo-50 focus:ring-2 focus:ring-indigo-300 outline-none"></div>
                 </div>
                 <div class="mb-4 text-xs text-gray-500 text-center">Période : {{ payForm.month }} ({{ paiePeriod == '15' ? 'Acompte' : 'Solde' }})</div>
                 <div class="flex justify-end gap-2"><button type="button" @click="showPayModal = false" class="px-3 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300">Annuler</button><button @click="confirmSalaryPayment" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 shadow">VALIDER</button></div>
