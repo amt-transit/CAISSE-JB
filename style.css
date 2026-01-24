@@ -18,14 +18,8 @@ body {
 @media (max-width: 640px) {
     /* Rendre le tableau scrollable horizontalement au lieu de le cacher */
     .table-compact { 
-        display: block; 
-        overflow-x: auto; 
         white-space: nowrap; 
-        width: 100%;
         -webkit-overflow-scrolling: touch; /* Scroll fluide sur iOS */
-        border: 1px solid #e5e7eb;
-        border-radius: 6px;
-        background: white;
     }
 
     /* Amélioration de l'ergonomie tactile pour les formulaires */

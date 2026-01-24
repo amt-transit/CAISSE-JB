@@ -37,7 +37,7 @@ createApp({
         const showPayModal = ref(false);
         const showFundModal = ref(false);
 
-        const newEmp = ref({ name: '', salary: 0, loan: 0, isTontine: false });
+        const newEmp = ref({ name: '', salary: 0, loan: 0, tontineCount: 0 });
         const editingEmp = ref({}); 
         const selectedEmployeeHistoryId = ref(null);
         const selectedEmployeeHistoryName = ref('');
@@ -52,7 +52,9 @@ createApp({
         // --- CHARGEMENT DES DONNÉES ---
         const loadEmployees = () => {
              onSnapshot(collection(db, "employees"), (snap) => {
-                employeesList.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                list.sort((a, b) => a.name.localeCompare(b.name));
+                employeesList.value = list;
             });
         };
 
@@ -105,15 +107,18 @@ createApp({
 
         // 3. Calcul Tontine (Ne payer que si pas encore fait ce mois-ci)
         const calculateTontineDeduc = (emp) => {
-            if (!emp.isTontine) return 0;
+            const count = parseInt(emp.tontineCount || (emp.isTontine ? 1 : 0));
+            if (count <= 0) return 0;
             // On ne propose la tontine que pour le SOLDE (30), pas l'acompte
             if (paiePeriod.value === '15') return 0;
 
             const summary = getMonthlySummary(emp, selectedPaieMonth.value);
-            // Si on a déjà payé au moins le montant de la tontine ce mois-ci en tontine, c'est bon
-            if (summary.totalTontinePaid >= globalTontineAmount.value) return 0;
+            const totalDue = count * globalTontineAmount.value;
 
-            return globalTontineAmount.value;
+            // Si on a déjà payé au moins le montant de la tontine ce mois-ci en tontine, c'est bon
+            if (summary.totalTontinePaid >= totalDue) return 0;
+
+            return totalDue - summary.totalTontinePaid;
         };
 
         // 4. Calcul Prêt (Plafond 10k mais intelligent)
@@ -168,7 +173,8 @@ createApp({
             return employeesList.value.reduce((acc, emp) => {
                 acc.salary += (parseFloat(emp.salary) || 0);
                 acc.loan += (parseFloat(emp.loan) || 0);
-                if (emp.isTontine) acc.tontine += (parseFloat(globalTontineAmount.value) || 0);
+                const count = parseInt(emp.tontineCount || (emp.isTontine ? 1 : 0));
+                acc.tontine += count * (parseFloat(globalTontineAmount.value) || 0);
                 return acc;
             }, { salary: 0, loan: 0, tontine: 0 });
         });
@@ -246,20 +252,20 @@ createApp({
         };
 
         const saveNewEmployee = async () => {
-            if(!newEmp.value.name || !newEmp.value.salary) return;
+            if(!newEmp.value.name) return;
             try {
                 await addDoc(collection(db, "employees"), { 
-                    name: newEmp.value.name, salary: newEmp.value.salary, loan: newEmp.value.loan || 0, isTontine: newEmp.value.isTontine
+                    name: newEmp.value.name, salary: newEmp.value.salary || 0, loan: newEmp.value.loan || 0, tontineCount: newEmp.value.tontineCount || 0, isTontine: (newEmp.value.tontineCount || 0) > 0
                 });
                 showAddEmployeeModal.value = false;
-                newEmp.value = { name: '', salary: 0, loan: 0, isTontine: false };
+                newEmp.value = { name: '', salary: 0, loan: 0, tontineCount: 0 };
             } catch(e) { alert("Erreur: " + e.message); }
         };
 
         const openEditEmployee = (emp) => { editingEmp.value = { ...emp }; showEditEmployeeModal.value = true; };
         const updateEmployee = async () => {
             try {
-                await updateDoc(doc(db, "employees", editingEmp.value.id), { name: editingEmp.value.name, salary: editingEmp.value.salary, loan: editingEmp.value.loan, isTontine: editingEmp.value.isTontine });
+                await updateDoc(doc(db, "employees", editingEmp.value.id), { name: editingEmp.value.name, salary: editingEmp.value.salary, loan: editingEmp.value.loan, tontineCount: editingEmp.value.tontineCount || 0, isTontine: (editingEmp.value.tontineCount || 0) > 0 });
                 showEditEmployeeModal.value = false;
             } catch(e) { alert("Erreur: " + e.message); }
         };
@@ -316,10 +322,51 @@ createApp({
             return { totalReceived, totalPaid, balance: totalReceived - totalPaid, totalLoans };
         });
 
-        const tontineMembers = computed(() => employeesList.value.filter(e => e.isTontine));
-        const hasPaidTontine = (empId) => {
+        const tontineMembers = computed(() => {
+            let list = [];
+            employeesList.value.forEach(e => {
+                const count = parseInt(e.tontineCount || (e.isTontine ? 1 : 0));
+                for(let i=1; i<=count; i++) {
+                    list.push({ ...e, shareIndex: i, uniqueId: e.id + '_' + i });
+                }
+            });
+            return list;
+        });
+        const hasPaidTontine = (empId, shareIndex = 1) => {
             const currentMonth = new Date().toISOString().slice(0, 7);
-            return salaryHistory.value.some(p => p.employeeId === empId && p.month === currentMonth && p.tontine > 0);
+            const totalPaid = salaryHistory.value
+                .filter(p => p.employeeId === empId && p.month === currentMonth)
+                .reduce((sum, p) => sum + (p.tontine || 0), 0);
+            return totalPaid >= (shareIndex * globalTontineAmount.value);
+        };
+
+        const getTontinePaidAmount = (empId) => {
+            const currentMonth = new Date().toISOString().slice(0, 7);
+            return salaryHistory.value
+                .filter(p => p.employeeId === empId && p.month === currentMonth)
+                .reduce((sum, p) => sum + (p.tontine || 0), 0);
+        };
+
+        const markTontinePayment = async (emp) => {
+            let amount = prompt("Montant de la cotisation pour " + emp.name + " ?", globalTontineAmount.value);
+            if (amount === null) return;
+            amount = parseFloat(amount);
+            if (isNaN(amount) || amount <= 0) return alert("Montant invalide");
+
+            try {
+                const currentMonth = new Date().toISOString().slice(0, 7);
+                await addDoc(collection(db, "salary_payments"), {
+                    employeeId: emp.id, 
+                    employeeName: emp.name, 
+                    month: currentMonth,
+                    type: 'Cotisation Tontine',
+                    base: 0, 
+                    loan: 0, 
+                    tontine: amount, 
+                    net: 0,
+                    timestamp: Timestamp.now()
+                });
+            } catch(e) { alert("Erreur: " + e.message); }
         };
 
         const exportSalaryHistoryPDF = () => {
@@ -451,7 +498,7 @@ createApp({
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth,
-            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, tontineMembers, globalTontineAmount, saveGlobalTontine,
+            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, getTontinePaidAmount, markTontinePayment, tontineMembers, globalTontineAmount, saveGlobalTontine,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals, employeesTotals,
             saveSalaryFund, deleteSalaryFund, salaryStats
         };
