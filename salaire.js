@@ -271,6 +271,19 @@ createApp({
         };
         const deleteEmployee = async (id) => { if(confirm("Supprimer cet employé ?")) await deleteDoc(doc(db, "employees", id)); };
 
+        const cancelTontine = async (emp) => {
+            if (!confirm(`Voulez-vous vraiment annuler toutes les parts de tontine pour ${emp.name} ? Cette action est irréversible.`)) {
+                return;
+            }
+            try {
+                await updateDoc(doc(db, "employees", emp.id), {
+                    tontineCount: 0,
+                    isTontine: false
+                });
+                alert(`La tontine pour ${emp.name} a été annulée.`);
+            } catch (e) { alert("Erreur lors de l'annulation de la tontine : " + e.message); }
+        };
+
         const deleteSalaryPayment = async (payment) => {
              if(!confirm("Annuler ce paiement ?")) return;
              try {
@@ -497,7 +510,7 @@ createApp({
             showAddEmployeeModal, showEditEmployeeModal, showIndividualHistoryModal, showPayModal, showFundModal,
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
-            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth,
+            saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth, cancelTontine,
             openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, getTontinePaidAmount, markTontinePayment, tontineMembers, globalTontineAmount, saveGlobalTontine,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals, employeesTotals,
             saveSalaryFund, deleteSalaryFund, salaryStats

@@ -73,7 +73,7 @@
                         <table class="w-full text-left table-compact border-collapse">
                             <thead class="bg-gray-50 sticky top-0"><tr><th>Nom</th><th class="text-right">Salaire Base</th><th class="text-right">Dette</th><th class="text-center">Tontine</th><th class="text-right">Actions</th></tr></thead>
                             <tbody>
-                                <tr v-for="emp in employeesList" :key="emp.id" class="hover:bg-gray-50">
+                                <tr v-for="emp in employeesList" :key="emp.id" class="even:bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer" @click="isAdmin ? openEditEmployee(emp) : openIndividualHistory(emp)">
                                     <td class="font-bold text-gray-800">{{ emp.name }}</td>
                                     <td class="text-right font-mono">{{ formatMoney(emp.salary) }}</td>
                                     <td class="text-right font-mono font-bold" :class="emp.loan > 0 ? 'text-red-600' : 'text-green-600'">{{ formatMoney(emp.loan) }}</td>
@@ -86,9 +86,9 @@
                                         <span v-else class="text-gray-300 text-xs">-</span>
                                     </td>
                                     <td class="text-right space-x-2">
-                                        <button @click="openIndividualHistory(emp)" class="text-blue-500 hover:text-blue-700" title="Historique"><i class="fa-solid fa-clock-rotate-left"></i></button>
-                                        <button v-if="isAdmin" @click="openEditEmployee(emp)" class="text-orange-500 hover:text-orange-700" title="Modifier"><i class="fa-solid fa-pen"></i></button>
-                                        <button v-if="isAdmin" @click="deleteEmployee(emp.id)" class="text-red-500 hover:text-red-700" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
+                                        <button @click.stop="openIndividualHistory(emp)" class="text-blue-500 hover:text-blue-700" title="Historique"><i class="fa-solid fa-clock-rotate-left"></i></button>
+                                        <button v-if="isAdmin" @click.stop="openEditEmployee(emp)" class="text-orange-500 hover:text-orange-700" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+                                        <button v-if="isAdmin" @click.stop="deleteEmployee(emp.id)" class="text-red-500 hover:text-red-700" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
                                     </td>
                                 </tr>
                             </tbody>
@@ -143,7 +143,7 @@
                             </thead>
 
                             <tbody>
-                                <tr v-for="emp in unpaidEmployees" :key="emp.id" class="hover:bg-gray-50">
+                                <tr v-for="emp in unpaidEmployees" :key="emp.id" class="even:bg-gray-50 hover:bg-gray-100 transition-colors" :class="{'cursor-pointer': isAdmin}" @click="isAdmin && openPayModal(emp)">
                                     <td class="font-bold">{{ emp.name }}</td>
                                     <td class="text-right text-gray-600">{{ formatMoney(calculateBase(emp)) }}</td>
                                     <td class="text-right text-red-500">{{ formatMoney(calculateLoanDeduc(emp)) }}</td>
@@ -156,7 +156,7 @@
                                     </td>
                                     <td class="text-right font-bold text-indigo-700 bg-indigo-50 font-mono">{{ formatMoney(calculateNet(emp)) }}</td>
                                     <td class="text-center">
-                                        <button v-if="isAdmin" @click="openPayModal(emp)" class="bg-indigo-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-indigo-700 shadow">PAYER</button>
+                                        <button v-if="isAdmin" @click.stop="openPayModal(emp)" class="bg-indigo-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-indigo-700 shadow">PAYER</button>
                                         <span v-else class="text-[9px] text-gray-400 italic">Lecture seule</span>
                                     </td>
                                 </tr>
@@ -203,7 +203,7 @@
                     </div>
                     <div class="bg-white rounded shadow p-4 flex-grow overflow-hidden flex flex-col">
                         <div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h2 class="font-bold text-gray-700">Historique des Dotations</h2><button v-if="isAdmin" @click="showFundModal = true" class="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold shadow hover:bg-green-700"><i class="fa-solid fa-plus mr-1"></i>Recevoir Fonds</button></div>
-                        <div class="overflow-auto flex-grow"><table class="w-full text-left table-compact border-collapse"><thead><tr><th>Date Enreg.</th><th>Mois Cible</th> <th>Note / Motif</th><th class="text-right">Montant</th><th class="text-right">Action</th></tr></thead><tbody><tr v-for="fund in salaryFunds" :key="fund.id" class="hover:bg-gray-50"><td class="text-gray-500 text-[10px]">{{ formatDate(fund.timestamp) }}</td><td class="font-bold text-indigo-700">{{ fund.targetMonth || '-' }}</td><td class="font-bold text-gray-700">{{ fund.note }}</td><td class="text-right font-mono font-bold text-green-600">+ {{ formatMoney(fund.amount) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryFund(fund.id)" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-trash"></i></button></td></tr></tbody></table></div>
+                        <div class="overflow-auto flex-grow"><table class="w-full text-left table-compact border-collapse"><thead><tr><th>Date Enreg.</th><th>Mois Cible</th> <th>Note / Motif</th><th class="text-right">Montant</th><th class="text-right">Action</th></tr></thead><tbody><tr v-for="fund in salaryFunds" :key="fund.id" class="even:bg-gray-50 hover:bg-gray-100 transition-colors"><td class="text-gray-500 text-[10px]">{{ formatDate(fund.timestamp) }}</td><td class="font-bold text-indigo-700">{{ fund.targetMonth || '-' }}</td><td class="font-bold text-gray-700">{{ fund.note }}</td><td class="text-right font-mono font-bold text-green-600">+ {{ formatMoney(fund.amount) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryFund(fund.id)" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-trash"></i></button></td></tr></tbody></table></div>
                     </div>
                 </div>
 
@@ -225,7 +225,7 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y">
-                                <tr v-for="group in groupedSalaryHistory" :key="group.month" class="hover:bg-gray-50 cursor-pointer transition" @click="openMonthDetails(group)">
+                                <tr v-for="group in groupedSalaryHistory" :key="group.month" class="even:bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors" @click="openMonthDetails(group)">
                                     <td class="p-3 font-bold text-gray-700">{{ group.month }}</td>
                                     
                                     <td class="p-3 text-right font-mono font-bold text-green-600 bg-green-50/30">
@@ -258,7 +258,7 @@
                     <div v-else class="overflow-auto flex-grow bg-gray-50 rounded border p-2">
                         <table class="w-full text-left table-compact border-collapse bg-white shadow-sm">
                             <thead class="bg-indigo-50 sticky top-0 text-indigo-900"><tr><th>Date</th><th>Employé</th><th>Type</th><th class="text-right">Remboursement Prêt</th><th class="text-right">Net Payé</th><th class="text-right">Actions</th></tr></thead>
-                            <tbody><tr v-for="pay in selectedHistoryMonth.payments" :key="pay.id" class="hover:bg-indigo-50 transition"><td class="text-gray-500 text-xs">{{ formatDate(pay.timestamp) }}</td><td class="font-bold">{{ pay.employeeName }}</td><td>{{ pay.type }}</td><td class="text-right font-mono text-green-600 font-bold">{{ pay.loan > 0 ? formatMoney(pay.loan) : '-' }}</td><td class="text-right font-mono font-bold text-gray-800 bg-gray-50">{{ formatMoney(pay.net) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryPayment(pay)" class="text-red-400 hover:text-red-600" title="Annuler ce paiement"><i class="fa-solid fa-trash"></i></button></td></tr></tbody>
+                            <tbody><tr v-for="pay in selectedHistoryMonth.payments" :key="pay.id" class="even:bg-indigo-50/40 hover:bg-indigo-100 transition-colors"><td class="text-gray-500 text-xs">{{ formatDate(pay.timestamp) }}</td><td class="font-bold">{{ pay.employeeName }}</td><td>{{ pay.type }}</td><td class="text-right font-mono text-green-600 font-bold">{{ pay.loan > 0 ? formatMoney(pay.loan) : '-' }}</td><td class="text-right font-mono font-bold text-gray-800 bg-gray-50">{{ formatMoney(pay.net) }}</td><td class="text-right"><button v-if="isAdmin" @click="deleteSalaryPayment(pay)" class="text-red-400 hover:text-red-600" title="Annuler ce paiement"><i class="fa-solid fa-trash"></i></button></td></tr></tbody>
                             <tfoot class="bg-gray-100 font-bold border-t-2 border-gray-200"><tr><td colspan="3" class="text-right p-2">TOTAUX MOIS :</td><td class="text-right text-green-700">{{ formatMoney(selectedHistoryMonth.totalLoan) }}</td><td class="text-right text-indigo-700">{{ formatMoney(selectedHistoryMonth.totalNet) }}</td><td></td></tr></tfoot>
                         </table>
                     </div>
@@ -358,7 +358,7 @@
                 <div class="overflow-auto flex-grow">
                     <table class="w-full text-left table-compact">
                         <thead class="bg-gray-100 sticky top-0"><tr><th>Date</th><th>Type</th><th>Période</th><th class="text-right">Montant</th></tr></thead>
-                        <tbody><tr v-for="pay in individualHistory" :key="pay.id" class="border-b last:border-0"><td class="text-xs text-gray-500">{{ formatDate(pay.timestamp) }}</td><td class="text-xs font-bold">{{ pay.type }}</td><td class="text-xs">{{ pay.month }}</td><td class="text-right text-sm font-mono font-bold text-indigo-600">{{ formatMoney(pay.net) }}</td></tr><tr v-if="individualHistory.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun paiement trouvé.</td></tr></tbody>
+                        <tbody><tr v-for="pay in individualHistory" :key="pay.id" class="border-b last:border-0 even:bg-gray-50 hover:bg-gray-100 transition-colors"><td class="text-xs text-gray-500">{{ formatDate(pay.timestamp) }}</td><td class="text-xs font-bold">{{ pay.type }}</td><td class="text-xs">{{ pay.month }}</td><td class="text-right text-sm font-mono font-bold text-indigo-600">{{ formatMoney(pay.net) }}</td></tr><tr v-if="individualHistory.length === 0"><td colspan="4" class="text-center py-4 text-gray-400">Aucun paiement trouvé.</td></tr></tbody>
                     </table>
                 </div>
             </div>
