@@ -47,6 +47,7 @@ createApp({
         const globalTontineAmount = ref(10000);
         const selectedBudgetMonth = ref(new Date().toISOString().slice(0, 7));
         const selectedPaieMonth = ref(new Date().toISOString().slice(0, 7));
+        const selectedTontineMonth = ref(new Date().toISOString().slice(0, 7));
         const selectedHistoryMonth = ref(null);
 
         // --- CHARGEMENT DES DONNÉES ---
@@ -194,6 +195,7 @@ createApp({
                 loan: suggestedLoan, 
                 maxLoan: emp.loan || 0,
                 tontine: tontineAmount,
+                absence: 0,
                 net: baseAmount - suggestedLoan - tontineAmount
             };
             showPayModal.value = true;
@@ -202,16 +204,16 @@ createApp({
         const recalcNet = () => {
             if (payForm.value.loan > payForm.value.maxLoan) payForm.value.loan = payForm.value.maxLoan;
             // Sécurité pour ne pas avoir de net négatif
-            const deductions = (payForm.value.loan || 0) + (payForm.value.tontine || 0);
+            const deductions = (payForm.value.loan || 0) + (payForm.value.tontine || 0) + (payForm.value.absence || 0);
             if (deductions > payForm.value.base) {
                 // On bloque visuellement ou on laisse faire (choix utilisateur), ici on laisse faire mais le net sera négatif ou on bloque
                 // payForm.value.net = 0; 
             }
-            payForm.value.net = payForm.value.base - (payForm.value.loan || 0) - (payForm.value.tontine || 0);
+            payForm.value.net = payForm.value.base - (payForm.value.loan || 0) - (payForm.value.tontine || 0) - (payForm.value.absence || 0);
         };
 
         const updateBaseFromNet = () => {
-            payForm.value.base = (parseFloat(payForm.value.net) || 0) + (parseFloat(payForm.value.loan) || 0) + (parseFloat(payForm.value.tontine) || 0);
+            payForm.value.base = (parseFloat(payForm.value.net) || 0) + (parseFloat(payForm.value.loan) || 0) + (parseFloat(payForm.value.tontine) || 0) + (parseFloat(payForm.value.absence) || 0);
         };
 
         const confirmSalaryPayment = async () => {
@@ -225,6 +227,7 @@ createApp({
                     base: payForm.value.base, 
                     loan: payForm.value.loan, 
                     tontine: payForm.value.tontine, 
+                    absence: payForm.value.absence || 0,
                     net: payForm.value.net,
                     timestamp: Timestamp.now()
                 });
@@ -346,7 +349,7 @@ createApp({
             return list;
         });
         const hasPaidTontine = (empId, shareIndex = 1) => {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = selectedTontineMonth.value;
             const totalPaid = salaryHistory.value
                 .filter(p => p.employeeId === empId && p.month === currentMonth)
                 .reduce((sum, p) => sum + (p.tontine || 0), 0);
@@ -354,7 +357,7 @@ createApp({
         };
 
         const getTontinePaidAmount = (empId) => {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = selectedTontineMonth.value;
             return salaryHistory.value
                 .filter(p => p.employeeId === empId && p.month === currentMonth)
                 .reduce((sum, p) => sum + (p.tontine || 0), 0);
@@ -367,7 +370,7 @@ createApp({
             if (isNaN(amount) || amount <= 0) return alert("Montant invalide");
 
             try {
-                const currentMonth = new Date().toISOString().slice(0, 7);
+                const currentMonth = selectedTontineMonth.value;
                 await addDoc(collection(db, "salary_payments"), {
                     employeeId: emp.id, 
                     employeeName: emp.name, 
@@ -442,17 +445,18 @@ createApp({
                     p.employeeName,
                     p.type,
                     p.loan > 0 ? formatMoney(p.loan) : '-', // Afficher '-' si pas de prêt
+                    p.absence > 0 ? formatMoney(p.absence) : '-',
                     formatMoney(p.net)
                 ]);
 
                 // Si le mois n'a pas de paiement, on met une ligne vide
                 if (tableBody.length === 0) {
-                    tableBody.push(['-', 'Aucun paiement enregistré', '-', '-', '-']);
+                    tableBody.push(['-', 'Aucun paiement enregistré', '-', '-', '-', '-']);
                 }
 
                 doc.autoTable({
                     startY: currentY + 20, // Juste en dessous du cadre résumé
-                    head: [['Date', 'Employé', 'Type', 'Prêt', 'Net Payé']],
+                    head: [['Date', 'Employé', 'Type', 'Prêt', 'Abs.', 'Net Payé']],
                     body: tableBody,
                     theme: 'grid',
                     headStyles: { 
@@ -466,8 +470,9 @@ createApp({
                     },
                     columnStyles: {
                         0: { cellWidth: 25 }, // Date
-                        3: { halign: 'right', cellWidth: 30 }, // Prêt aligné droite
-                        4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } // Net aligné droite
+                        3: { halign: 'right', cellWidth: 20 }, // Prêt aligné droite
+                        4: { halign: 'right', cellWidth: 20 }, // Absence aligné droite
+                        5: { halign: 'right', fontStyle: 'bold', cellWidth: 30 } // Net aligné droite
                     },
                     margin: { left: 14, right: 14 },
                     // Important : Mise à jour de la position Y après le tableau
@@ -511,7 +516,7 @@ createApp({
             newEmp, editingEmp, payForm, newFund, unpaidEmployees, selectedEmployeeHistoryName, individualHistory,
             groupedSalaryHistory, selectedHistoryMonth, openMonthDetails, closeMonthDetails,
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth, cancelTontine,
-            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, getTontinePaidAmount, markTontinePayment, tontineMembers, globalTontineAmount, saveGlobalTontine,
+            openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, getTontinePaidAmount, markTontinePayment, tontineMembers, globalTontineAmount, saveGlobalTontine, selectedTontineMonth,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals, employeesTotals,
             saveSalaryFund, deleteSalaryFund, salaryStats
         };
