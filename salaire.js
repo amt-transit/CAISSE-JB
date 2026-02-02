@@ -385,6 +385,34 @@ createApp({
             } catch(e) { alert("Erreur: " + e.message); }
         };
 
+        const tontineBeneficiaries = computed(() => {
+            return salaryHistory.value.filter(p => 
+                p.month === selectedTontineMonth.value && 
+                p.type === 'Gain Tontine'
+            );
+        });
+
+        const markTontineBeneficiary = async (emp) => {
+            if (!confirm(`Confirmer que ${emp.name} récupère la tontine du mois (${selectedTontineMonth.value}) ?`)) return;
+            
+            const totalShares = employeesList.value.reduce((sum, e) => sum + (parseInt(e.tontineCount || (e.isTontine ? 1 : 0))), 0);
+            const defaultAmount = totalShares * globalTontineAmount.value;
+
+            let amount = prompt("Montant récupéré ?", defaultAmount);
+            if (amount === null) return;
+            amount = parseFloat(amount);
+            if (isNaN(amount) || amount <= 0) return alert("Montant invalide");
+
+            try {
+                await addDoc(collection(db, "salary_payments"), {
+                    employeeId: emp.id, employeeName: emp.name, month: selectedTontineMonth.value,
+                    type: 'Gain Tontine', base: 0, loan: 0, tontine: 0, tontineGain: amount, net: 0, timestamp: Timestamp.now()
+                });
+            } catch(e) { alert("Erreur: " + e.message); }
+        };
+
+        const deleteTontineBeneficiary = async (payment) => { if(confirm("Supprimer ce gain ?")) await deleteDoc(doc(db, "salary_payments", payment.id)); };
+
         const exportSalaryHistoryPDF = () => {
             const doc = new jspdf.jsPDF();
             
@@ -518,7 +546,8 @@ createApp({
             saveNewEmployee, updateEmployee, deleteEmployee, openEditEmployee, openIndividualHistory, selectedBudgetMonth, cancelTontine,
             openPayModal, confirmSalaryPayment, deleteSalaryPayment, recalcNet, updateBaseFromNet, hasPaidTontine, getTontinePaidAmount, markTontinePayment, tontineMembers, globalTontineAmount, saveGlobalTontine, selectedTontineMonth,
             calculateBase, calculateLoanDeduc, calculateTontineDeduc, calculateNet, exportSalaryHistoryPDF, paieTotals, employeesTotals,
-            saveSalaryFund, deleteSalaryFund, salaryStats
+            saveSalaryFund, deleteSalaryFund, salaryStats,
+            tontineBeneficiaries, markTontineBeneficiary, deleteTontineBeneficiary
         };
     }
 }).mount('#app');
