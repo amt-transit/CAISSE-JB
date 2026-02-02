@@ -217,6 +217,13 @@ createApp({
         };
 
         const confirmSalaryPayment = async () => {
+            // VERIFICATION BUDGET : On ne peut pas payer si le mois n'a pas de dotation
+            const hasBudget = salaryFunds.value.some(f => f.targetMonth === payForm.value.month);
+            if (!hasBudget) {
+                alert(`Impossible d'effectuer un paiement pour ${payForm.value.month} : Aucun fonds n'a été alloué pour ce mois. Veuillez ajouter une dotation dans l'onglet "Fonds & Budget".`);
+                return;
+            }
+
             try {
                 // On enregistre
                 await addDoc(collection(db, "salary_payments"), {
